@@ -81,11 +81,36 @@ class SQLiteStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     paper_id INTEGER,
                     ranking_date TEXT NOT NULL,
+                    ranking_method TEXT NOT NULL DEFAULT 'profile',
                     local_score REAL NOT NULL,
                     rank INTEGER NOT NULL,
                     reason TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(paper_id) REFERENCES candidate_papers(id) ON DELETE SET NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS user_zotero_paper_embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    paper_id INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    embedding_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(paper_id, model_name),
+                    FOREIGN KEY(paper_id) REFERENCES user_library_papers(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS arxiv_paper_embeddings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    paper_id INTEGER NOT NULL,
+                    model_name TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    embedding_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(paper_id, model_name),
+                    FOREIGN KEY(paper_id) REFERENCES candidate_papers(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS feedback (
@@ -120,6 +145,10 @@ class SQLiteStore:
                     ON recommendations(recommendation_date);
                 CREATE INDEX IF NOT EXISTS idx_local_rankings_date
                     ON local_rankings(ranking_date);
+                CREATE INDEX IF NOT EXISTS idx_zotero_embedding_lookup
+                    ON user_zotero_paper_embeddings(paper_id, model_name);
+                CREATE INDEX IF NOT EXISTS idx_arxiv_embedding_lookup
+                    ON arxiv_paper_embeddings(paper_id, model_name);
                 CREATE INDEX IF NOT EXISTS idx_feedback_paper_id
                     ON feedback(paper_id);
                 """
@@ -127,6 +156,7 @@ class SQLiteStore:
             self._migrate_user_profile_schema(connection)
             self._migrate_legacy_papers(connection)
             self._migrate_recommendation_tables(connection)
+            self._ensure_column(connection, "local_rankings", "ranking_method", "TEXT NOT NULL DEFAULT 'profile'")
             self._migrate_rough_recommendations(connection)
 
     def _ensure_column(
@@ -230,6 +260,22 @@ class SQLiteStore:
             rows = connection.execute(query, params).fetchall()
         return [_user_library_paper_from_row(row) for row in rows]
 
+    def get_zotero_papers_with_abstract_by_date_added(self, limit: int = 500) -> list[Paper]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM user_library_papers
+                WHERE source = ?
+                    AND abstract IS NOT NULL
+                    AND TRIM(abstract) <> ''
+                ORDER BY date_added IS NULL ASC, date_added DESC, id DESC
+                LIMIT ?
+                """,
+                (PaperSource.ZOTERO.value, limit),
+            ).fetchall()
+        return [_user_library_paper_from_row(row) for row in rows]
+
     def get_candidate_papers(
         self,
         source: PaperSource | None = None,
@@ -244,6 +290,22 @@ class SQLiteStore:
         params.append(limit)
         with self.connect() as connection:
             rows = connection.execute(query, params).fetchall()
+        return [_candidate_paper_from_row(row) for row in rows]
+
+    def get_arxiv_candidates_with_abstract(self, limit: int = 200) -> list[Paper]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM candidate_papers
+                WHERE source = ?
+                    AND abstract IS NOT NULL
+                    AND TRIM(abstract) <> ''
+                ORDER BY published_at DESC, created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (PaperSource.ARXIV.value, limit),
+            ).fetchall()
         return [_candidate_paper_from_row(row) for row in rows]
 
     def get_candidate_paper_by_external_id(self, source: PaperSource | str, external_id: str) -> Paper | None:
@@ -314,13 +376,14 @@ class SQLiteStore:
             cursor = connection.execute(
                 """
                 INSERT INTO local_rankings (
-                    paper_id, ranking_date, local_score, rank, reason, created_at
+                    paper_id, ranking_date, ranking_method, local_score, rank, reason, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["paper_id"],
                     payload["ranking_date"],
+                    payload["ranking_method"],
                     payload["local_score"],
                     payload["rank"],
                     payload["reason"],
@@ -336,6 +399,62 @@ class SQLiteStore:
                 (limit,),
             ).fetchall()
         return [_local_ranking_from_row(row) for row in rows]
+
+    def get_user_zotero_paper_embedding(
+        self,
+        paper_id: int,
+        model_name: str,
+        content_hash: str,
+    ) -> list[float] | None:
+        return self._get_embedding(
+            table_name="user_zotero_paper_embeddings",
+            paper_id=paper_id,
+            model_name=model_name,
+            content_hash=content_hash,
+        )
+
+    def save_user_zotero_paper_embedding(
+        self,
+        paper_id: int,
+        model_name: str,
+        content_hash: str,
+        embedding: list[float],
+    ) -> None:
+        self._save_embedding(
+            table_name="user_zotero_paper_embeddings",
+            paper_id=paper_id,
+            model_name=model_name,
+            content_hash=content_hash,
+            embedding=embedding,
+        )
+
+    def get_arxiv_paper_embedding(
+        self,
+        paper_id: int,
+        model_name: str,
+        content_hash: str,
+    ) -> list[float] | None:
+        return self._get_embedding(
+            table_name="arxiv_paper_embeddings",
+            paper_id=paper_id,
+            model_name=model_name,
+            content_hash=content_hash,
+        )
+
+    def save_arxiv_paper_embedding(
+        self,
+        paper_id: int,
+        model_name: str,
+        content_hash: str,
+        embedding: list[float],
+    ) -> None:
+        self._save_embedding(
+            table_name="arxiv_paper_embeddings",
+            paper_id=paper_id,
+            model_name=model_name,
+            content_hash=content_hash,
+            embedding=embedding,
+        )
 
     def save_feedback(self, feedback: Feedback) -> Feedback:
         payload = feedback.model_dump(mode="json")
@@ -487,6 +606,52 @@ class SQLiteStore:
                 paper.id,
             ),
         )
+
+    def _get_embedding(
+        self,
+        table_name: str,
+        paper_id: int,
+        model_name: str,
+        content_hash: str,
+    ) -> list[float] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT embedding_json, content_hash
+                FROM {table_name}
+                WHERE paper_id = ? AND model_name = ?
+                """,
+                (paper_id, model_name),
+            ).fetchone()
+        if not row or row["content_hash"] != content_hash:
+            return None
+        return [float(value) for value in _from_json(row["embedding_json"], [])]
+
+    def _save_embedding(
+        self,
+        table_name: str,
+        paper_id: int,
+        model_name: str,
+        content_hash: str,
+        embedding: list[float],
+    ) -> None:
+        from datetime import datetime
+
+        now = datetime.utcnow().isoformat()
+        with self.connect() as connection:
+            connection.execute(
+                f"""
+                INSERT INTO {table_name} (
+                    paper_id, model_name, content_hash, embedding_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(paper_id, model_name) DO UPDATE SET
+                    content_hash = excluded.content_hash,
+                    embedding_json = excluded.embedding_json,
+                    updated_at = excluded.updated_at
+                """,
+                (paper_id, model_name, content_hash, _to_json(embedding), now, now),
+            )
 
     def _migrate_legacy_papers(self, connection: sqlite3.Connection) -> None:
         if not _table_exists(connection, "papers"):
@@ -678,10 +843,10 @@ class SQLiteStore:
         connection.execute(
             """
             INSERT INTO local_rankings (
-                paper_id, ranking_date, local_score, rank, reason, created_at
+                paper_id, ranking_date, ranking_method, local_score, rank, reason, created_at
             )
             SELECT
-                paper_id, recommendation_date, local_score, rank, reason, created_at
+                paper_id, recommendation_date, 'profile', local_score, rank, reason, created_at
             FROM recommendations
             WHERE llm_score IS NULL
                 AND card_json IS NULL
@@ -809,6 +974,7 @@ def _local_ranking_from_row(row: sqlite3.Row) -> LocalRanking:
         id=row["id"],
         paper_id=row["paper_id"],
         ranking_date=row["ranking_date"],
+        ranking_method=row["ranking_method"],
         local_score=row["local_score"],
         rank=row["rank"],
         reason=row["reason"],

@@ -39,6 +39,7 @@ class LocalRanking(BaseModel):
     id: int | None = None
     paper_id: int | None = None
     ranking_date: date = Field(default_factory=date.today)
+    ranking_method: str = "profile"
     local_score: float
     rank: int
     reason: str = ""

@@ -91,6 +91,7 @@ def run_llm_reranking(
     ranked, embedding_backend = run_local_ranking(
         candidate_limit=candidate_limit,
         top_n=local_top_n or settings.local_top_k,
+        ranking_mode="profile",
         include_recommended=include_recommended,
         save_local_rankings=False,
     )

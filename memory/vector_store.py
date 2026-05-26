@@ -40,6 +40,12 @@ class LocalVectorStore:
     def embed_text(self, text: str) -> list[float]:
         return self.embed_texts([text])[0]
 
+    @property
+    def cache_model_name(self) -> str:
+        if self.active_backend == "sentence-transformers":
+            return f"sentence-transformers:{self.model_name}"
+        return f"hashing:{self.dimensions}"
+
     def _try_load_sentence_transformer(self) -> None:
         try:
             from sentence_transformers import SentenceTransformer
