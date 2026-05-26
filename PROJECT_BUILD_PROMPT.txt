@@ -1,0 +1,520 @@
+你是一个资深全栈工程师和 AI Agent 系统架构师。现在请你帮助我从零构建一个项目：Local-first Personalized Academic Paper Recommendation Agent。
+
+项目目标：
+构建一个本地优先的学术论文个性化推荐 AI Agent。用户在本地运行该项目，配置自己的 LLM API Key、Zotero API 信息和研究兴趣后，系统可以连接用户的 Zotero 文献库，从 arXiv 拉取最新论文，基于用户研究画像进行本地粗排，再调用云端 LLM 进行精排和推荐解释，最后生成每日论文推荐结果，并支持用户反馈来更新兴趣画像。
+
+重要要求：
+1. 这是一个参加 AI Agent 比赛的项目，重点不是复杂算法，而是完整的 Agent 工作流、模块化设计、可演示性和混合架构。
+2. 项目必须采用 local-first 设计，不依赖开发者提供服务器。
+3. 用户自己的 API Key、Zotero 信息、推荐历史、反馈数据都存储在本地。
+4. 本地端负责隐私敏感数据处理、Zotero 数据读取、本地缓存、embedding、粗排和反馈记忆。
+5. 云端 LLM 只负责复杂推理、精排、总结和推荐解释。
+6. 请分模块完成代码，每完成一个模块后必须停止，并向我说明：
+   - 本模块完成了什么
+   - 关键文件有哪些
+   - 如何运行或测试
+   - 需要我验收哪些功能
+   在我明确说“通过，进入下一模块”之前，不要继续写下一个模块。
+7. 每个模块都要保证代码可运行、结构清晰、便于后续扩展。
+8. 请优先实现 MVP，不要一开始加入过多复杂功能。
+9. 如有不确定的依赖或实现方式，请选择简单、稳定、容易演示的方案。
+10. 所有代码要包含必要注释，但不要过度注释。
+11. 请不要把 API Key 写死在代码里。
+12. 请使用 .env 或本地配置文件管理敏感配置。
+13. 请提供 README 中对应模块的运行说明。
+14. 每次修改代码时，请保持项目结构整洁，不要把所有逻辑写在一个文件里。
+
+推荐技术栈：
+- Python 作为核心后端和 Agent workflow 语言
+- Streamlit 作为第一版本地 Web UI
+- SQLite 作为本地数据库
+- FAISS 或 Chroma 作为本地向量库；如果为了 MVP 简化，可以先用 sklearn / numpy 做向量相似度，后续再抽象为 VectorStore
+- sentence-transformers 作为本地 embedding 模型
+- pyzotero 连接 Zotero Web API
+- arxiv Python package 或直接请求 arXiv API
+- OpenAI-compatible API client，用于调用云端 LLM
+- pydantic 管理配置和数据结构
+
+项目建议目录结构：
+
+paper-agent/
+├── README.md
+├── requirements.txt
+├── .env.example
+├── app/
+│   ├── main.py
+│   └── ui_streamlit.py
+├── agents/
+│   ├── profile_agent.py
+│   ├── collector_agent.py
+│   ├── ranker_agent.py
+│   └── digest_agent.py
+├── connectors/
+│   ├── zotero_connector.py
+│   └── arxiv_connector.py
+├── memory/
+│   ├── sqlite_store.py
+│   └── vector_store.py
+├── llm/
+│   ├── client.py
+│   └── prompts.py
+├── models/
+│   ├── paper.py
+│   ├── user_profile.py
+│   └── recommendation.py
+├── workflows/
+│   └── daily_recommendation_workflow.py
+├── data/
+│   └── .gitkeep
+└── tests/
+    └── .gitkeep
+
+项目核心流程：
+
+1. 用户配置：
+   - LLM API Base URL
+   - LLM API Key
+   - LLM Model Name
+   - Zotero User ID
+   - Zotero API Key
+   - 用户显式研究兴趣关键词
+   - arXiv 关注类别，例如 cs.AI、cs.CL、cs.LG、cs.CV
+
+2. Profile Agent：
+   - 从 Zotero 读取用户文献
+   - 提取 title、abstract、tags、collections、year 等信息
+   - 结合用户显式兴趣生成用户研究画像
+   - 本地保存 profile
+
+3. Collector Agent：
+   - 从 arXiv 拉取最近若干天或最近 N 篇论文
+   - 保存 title、abstract、authors、published date、arxiv id、categories、url
+
+4. Ranker Agent：
+   - 本地 embedding 用户 profile、Zotero paper、arXiv paper
+   - 计算候选论文与用户画像的相似度
+   - 过滤已推荐、已忽略、重复论文
+   - 输出 Top N 候选论文
+
+5. LLM Rerank：
+   - 将 Top N 候选论文的 title + abstract + 用户画像摘要发给云端 LLM
+   - 让 LLM 选择 Top 5
+   - 输出结构化 JSON，包括推荐分数和推荐理由
+
+6. Digest Agent：
+   - 生成每篇论文的推荐卡片：
+     - title
+     - authors
+     - arxiv_url
+     - one_sentence_summary
+     - why_recommended
+     - related_user_interests
+     - reading_priority
+   - 生成今日推荐摘要
+
+7. Feedback：
+   - 用户可以对推荐结果标记：
+     - like
+     - dislike
+     - save
+     - not_relevant
+     - already_read
+   - 反馈写入本地 SQLite
+   - 后续推荐时使用反馈调整权重
+
+8. UI：
+   - 配置页
+   - 用户画像页
+   - 今日推荐页
+   - 反馈按钮
+   - 运行工作流按钮
+   - 历史推荐页，MVP 可简化
+
+请严格按照以下模块顺序开发：
+
+====================================
+模块 0：项目初始化与基础骨架
+====================================
+
+目标：
+创建项目基础结构、依赖文件、配置文件模板、README 初版、基础数据模型。
+
+需要完成：
+1. 创建目录结构。
+2. 编写 requirements.txt。
+3. 编写 .env.example。
+4. 编写 README.md，说明项目目标、架构、运行方式。
+5. 创建基础 pydantic 数据模型：
+   - models/paper.py
+   - models/user_profile.py
+   - models/recommendation.py
+6. 创建 config 读取逻辑：
+   - app/config.py
+7. 确保项目可以通过简单命令运行健康检查：
+   - python app/main.py
+8. main.py 暂时只打印配置加载状态和项目启动信息，不要实现完整功能。
+
+验收标准：
+- 项目目录完整。
+- requirements.txt 合理。
+- .env.example 包含必要字段但不包含真实密钥。
+- python app/main.py 可以运行。
+- README 能解释项目是什么以及如何启动。
+
+完成模块 0 后停止，等待我验收。
+
+====================================
+模块 1：本地 SQLite 存储模块
+====================================
+
+目标：
+实现本地数据库，用于保存用户配置、Zotero 文献、arXiv 候选论文、推荐结果和用户反馈。
+
+需要完成：
+1. memory/sqlite_store.py。
+2. 自动创建 SQLite 表。
+3. 支持保存和读取：
+   - papers
+   - recommendations
+   - feedback
+   - user_profile
+4. 不需要做复杂 ORM，可以用 sqlite3 或 SQLAlchemy。优先简单稳定。
+5. 提供一个简单测试脚本或 main.py 命令验证数据库创建和读写。
+
+验收标准：
+- 可以初始化 data/local.db。
+- 可以插入 paper。
+- 可以插入 recommendation。
+- 可以插入 feedback。
+- 可以读取历史推荐和反馈。
+
+完成模块 1 后停止，等待我验收。
+
+====================================
+模块 2：Zotero Connector
+====================================
+
+目标：
+实现通过 Zotero Web API 读取用户 Zotero 文献库。
+
+需要完成：
+1. connectors/zotero_connector.py。
+2. 使用 pyzotero 或 requests。
+3. 从 .env 中读取：
+   - ZOTERO_USER_ID
+   - ZOTERO_API_KEY
+   - ZOTERO_LIBRARY_TYPE，默认 user
+4. 拉取用户 Zotero items。
+5. 提取并转换为统一 Paper 模型：
+   - title
+   - abstract
+   - authors
+   - year
+   - tags
+   - source = zotero
+   - external_id
+   - url
+6. 支持限制读取数量，例如 max_items=50。
+7. 保存到 SQLite。
+8. 处理没有 abstract 的情况。
+9. 提供测试入口，例如：
+   - python -m connectors.zotero_connector
+
+验收标准：
+- 能使用我的 Zotero API Key 拉取我的 Zotero 文献。
+- 能打印前几篇论文标题。
+- 能保存到本地 SQLite。
+- 没有 API Key 时给出清晰错误提示。
+
+完成模块 2 后停止，等待我验收。
+
+====================================
+模块 3：arXiv Collector
+====================================
+
+目标：
+实现从 arXiv 拉取候选论文。
+
+需要完成：
+1. connectors/arxiv_connector.py。
+2. 支持配置 arXiv categories：
+   - cs.AI
+   - cs.CL
+   - cs.LG
+   - cs.CV
+   - cs.IR
+   默认可从 .env 或 UI 配置读取。
+3. 支持 max_results。
+4. 支持按 submittedDate 排序。
+5. 提取统一 Paper 模型：
+   - title
+   - abstract
+   - authors
+   - published_at
+   - categories
+   - source = arxiv
+   - external_id
+   - url
+6. 保存到 SQLite。
+7. 提供测试入口：
+   - python -m connectors.arxiv_connector
+
+验收标准：
+- 能拉取指定类别的 arXiv 论文。
+- 能打印 Top N 论文标题和链接。
+- 能保存到 SQLite。
+- 与 Zotero Paper 使用统一模型。
+
+完成模块 3 后停止，等待我验收。
+
+====================================
+模块 4：Profile Agent
+====================================
+
+目标：
+根据用户显式兴趣和 Zotero 文献构建用户研究画像。
+
+需要完成：
+1. agents/profile_agent.py。
+2. 输入：
+   - 用户显式兴趣关键词
+   - Zotero papers
+3. 输出 UserProfile 模型，包括：
+   - explicit_interests
+   - inferred_keywords
+   - representative_papers
+   - research_summary
+4. MVP 阶段先用本地规则：
+   - 统计 tags
+   - 统计 title / abstract 关键词
+   - 选择代表性论文
+5. 如 LLM API 可用，可以提供可选的 LLM profile summary，但不能强依赖。
+6. 保存 profile 到 SQLite。
+7. 提供测试入口。
+
+验收标准：
+- 能从 Zotero 文献生成一个可读用户画像。
+- 没有 LLM API 时也能运行。
+- 有 LLM API 时可以生成更自然的 research_summary。
+
+完成模块 4 后停止，等待我验收。
+
+====================================
+模块 5：本地 Embedding 与粗排 Ranker
+====================================
+
+目标：
+实现本地语义相似度粗排。
+
+需要完成：
+1. memory/vector_store.py。
+2. agents/ranker_agent.py。
+3. 使用 sentence-transformers 生成 embedding。
+4. 对 UserProfile 和 arXiv papers 进行相似度计算。
+5. 结合用户显式兴趣关键词做简单加权。
+6. 过滤：
+   - 已推荐过的论文
+   - 用户标记 not_relevant 或 dislike 的相似论文，MVP 可先只过滤 exact external_id
+7. 输出 Top N 候选论文及 local_score。
+8. 保存候选推荐记录到 SQLite。
+
+验收标准：
+- 可以读取 Zotero profile 和 arXiv papers。
+- 可以输出本地 Top 20 候选论文。
+- 每篇候选有 local_score。
+- 没有云端 LLM 时也能得到推荐结果。
+
+完成模块 5 后停止，等待我验收。
+
+====================================
+模块 6：LLM Client 与云端精排
+====================================
+
+目标：
+实现 OpenAI-compatible LLM 调用，用于 Top N 候选论文精排。
+
+需要完成：
+1. llm/client.py。
+2. llm/prompts.py。
+3. 支持配置：
+   - LLM_API_KEY
+   - LLM_BASE_URL
+   - LLM_MODEL
+4. 输入：
+   - UserProfile summary
+   - Top N candidate papers
+5. 输出结构化 JSON：
+   - selected_papers
+   - rerank_score
+   - one_sentence_summary
+   - why_recommended
+   - related_user_interests
+   - reading_priority
+6. 必须处理 LLM 返回非合法 JSON 的情况。
+7. 如果 LLM 不可用，应 fallback 到本地 Top 5。
+8. 不要把完整 Zotero 文献库发给 LLM，只发送压缩后的用户画像和候选论文 metadata。
+
+验收标准：
+- 配置 LLM API 后可以得到 Top 5 精排推荐。
+- 没有 LLM API 时系统仍可运行，返回本地 Top 5。
+- LLM 输入中不包含完整 Zotero 数据。
+- 推荐结果包含解释字段。
+
+完成模块 6 后停止，等待我验收。
+
+====================================
+模块 7：Daily Recommendation Workflow
+====================================
+
+目标：
+串联完整每日推荐工作流。
+
+需要完成：
+1. workflows/daily_recommendation_workflow.py。
+2. 串联：
+   - 加载配置
+   - 拉取 Zotero
+   - 构建 profile
+   - 拉取 arXiv
+   - 本地粗排
+   - LLM 精排
+   - 生成推荐结果
+   - 保存到 SQLite
+3. 支持一个命令运行完整流程：
+   - python -m workflows.daily_recommendation_workflow
+4. 输出清晰日志。
+5. 对每一步做异常处理，不能一步失败就完全崩溃，除非是关键配置缺失。
+
+验收标准：
+- 一条命令可以跑通完整推荐流程。
+- 推荐结果保存到本地。
+- 控制台能看到 Top 5 推荐。
+- 每一步日志清晰。
+
+完成模块 7 后停止，等待我验收。
+
+====================================
+模块 8：Streamlit 本地 UI
+====================================
+
+目标：
+实现可演示的本地 Web UI。
+
+需要完成：
+1. app/ui_streamlit.py。
+2. 页面包括：
+   - 配置页
+   - 用户画像页
+   - 运行推荐页
+   - 今日推荐结果页
+   - 用户反馈按钮
+3. 用户可以在 UI 中输入：
+   - LLM API Key
+   - LLM Base URL
+   - LLM Model
+   - Zotero User ID
+   - Zotero API Key
+   - 研究兴趣
+   - arXiv categories
+4. 配置保存到本地 .env 或 local config 文件。
+5. 点击按钮运行完整 workflow。
+6. 展示推荐卡片：
+   - title
+   - authors
+   - summary
+   - why_recommended
+   - priority
+   - arXiv link
+7. 支持反馈按钮：
+   - like
+   - dislike
+   - save
+   - not_relevant
+   - already_read
+8. 反馈写入 SQLite。
+
+验收标准：
+- streamlit run app/ui_streamlit.py 可以启动。
+- 可以在 UI 中配置参数。
+- 可以点击运行推荐。
+- 可以看到推荐卡片。
+- 可以提交反馈。
+- 适合比赛 demo。
+
+完成模块 8 后停止，等待我验收。
+
+====================================
+模块 9：答辩展示增强
+====================================
+
+目标：
+增强项目的可解释性和可展示性。
+
+需要完成：
+1. 在 UI 中展示 Agent Workflow 状态：
+   - Zotero Sync
+   - Profile Build
+   - arXiv Collect
+   - Local Rank
+   - LLM Rerank
+   - Digest Generate
+2. 增加“为什么这是混合架构”的说明页。
+3. 增加推荐解释详情：
+   - local_score
+   - rerank_score
+   - matched_keywords
+   - related profile interests
+4. 增加历史推荐页。
+5. README 增加答辩用项目亮点说明。
+
+验收标准：
+- Demo 时能清楚看到 Agent 执行流程。
+- 能说明本地端和云端分别做了什么。
+- 每篇推荐结果有可解释信息。
+- README 可用于比赛项目介绍。
+
+完成模块 9 后停止，等待我验收。
+
+====================================
+模块 10：可扩展性接口整理
+====================================
+
+目标：
+为队友后续扩展预留接口。
+
+需要完成：
+1. 定义统一 BaseConnector。
+2. 定义统一 BaseRanker。
+3. 定义统一 BaseLLMClient。
+4. 为未来数据源预留：
+   - Semantic Scholar
+   - OpenReview
+   - Papers With Code
+5. 为未来本地 Zotero Local API 预留接口。
+6. 整理代码结构，补充必要文档。
+
+验收标准：
+- 后续新增数据源不需要大改主流程。
+- 后续替换 LLM provider 不需要大改主流程。
+- 后续替换 ranking 策略不需要大改主流程。
+- README 有扩展指南。
+
+完成模块 10 后停止，等待我验收。
+
+开发原则：
+1. 每个模块都要小步提交式完成。
+2. 不要提前实现后面模块。
+3. 不要为了“高级”牺牲可运行性。
+4. 优先保证 MVP 跑通。
+5. 所有外部 API 调用都要有异常处理。
+6. 所有用户隐私数据默认保存在本地。
+7. 所有云端 LLM 调用前都要尽量压缩输入，避免上传完整个人文献库。
+8. 代码要方便我理解和继续开发。
+9. 开始做每个模块前，先与我讨论你的方案，告诉我你将要怎么做。
+9. 完成每个模块后，必须停止并等待我的验收指令。
+10. 每次回复都请明确当前完成的是哪个模块。
+11. 为整体项目建立一个虚拟环境，各种依赖都装到该虚拟环境里。
+12. 你的工作目录：/Users/jxj/paper-agent/。
+13. 有任何不清楚、不明确的地方，都停下来先与我讨论、沟通，无异议后再继续执行。
+
+现在请从【模块 0：项目初始化与基础骨架】开始实现。完成模块 0 后停止。
