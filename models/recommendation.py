@@ -35,8 +35,22 @@ class RerankResponse(BaseModel):
     selected_papers: list[RerankedPaper] = Field(default_factory=list)
 
 
+class RankingRun(BaseModel):
+    id: int | None = None
+    ranking_method: str = "profile"
+    embedding_model: str = ""
+    candidate_limit: int = 0
+    library_limit: int | None = None
+    top_n: int = 20
+    profile_id: int | None = None
+    include_recommended: bool = False
+    result_count: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class LocalRanking(BaseModel):
     id: int | None = None
+    ranking_run_id: int | None = None
     paper_id: int | None = None
     ranking_date: date = Field(default_factory=date.today)
     ranking_method: str = "profile"
@@ -48,6 +62,7 @@ class LocalRanking(BaseModel):
 
 class Recommendation(BaseModel):
     id: int | None = None
+    ranking_run_id: int | None = None
     paper_id: int | None = None
     recommendation_date: date = Field(default_factory=date.today)
     local_score: float | None = None

@@ -27,7 +27,14 @@ def run_health_check() -> None:
 def run_db_smoke_test() -> None:
     from memory.sqlite_store import SQLiteStore
     from models.paper import Paper, PaperSource
-    from models.recommendation import Feedback, FeedbackType, LocalRanking, Recommendation, RecommendationCard
+    from models.recommendation import (
+        Feedback,
+        FeedbackType,
+        LocalRanking,
+        RankingRun,
+        Recommendation,
+        RecommendationCard,
+    )
     from models.user_profile import UserProfile
 
     settings = get_settings()
@@ -48,8 +55,18 @@ def run_db_smoke_test() -> None:
             url="https://example.com/paper",
         )
     )
+    ranking_run = store.save_ranking_run(
+        RankingRun(
+            ranking_method="profile",
+            embedding_model="smoke-test",
+            candidate_limit=1,
+            top_n=1,
+            result_count=1,
+        )
+    )
     recommendation = store.save_recommendation(
         Recommendation(
+            ranking_run_id=ranking_run.id,
             paper_id=paper.id,
             local_score=0.91,
             llm_score=0.88,
@@ -68,6 +85,7 @@ def run_db_smoke_test() -> None:
     )
     local_ranking = store.save_local_ranking(
         LocalRanking(
+            ranking_run_id=ranking_run.id,
             paper_id=paper.id,
             local_score=0.91,
             rank=1,
@@ -102,6 +120,7 @@ def run_db_smoke_test() -> None:
     print("SQLite smoke test: OK")
     print(f"Database path: {settings.database_path}")
     print(f"Saved paper id: {paper.id}")
+    print(f"Saved ranking run id: {ranking_run.id}")
     print(f"Saved recommendation id: {recommendation.id}")
     print(f"Saved local ranking id: {local_ranking.id}")
     print(f"Saved feedback id: {feedback.id}")

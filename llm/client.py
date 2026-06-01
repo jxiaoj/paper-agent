@@ -3,11 +3,11 @@ import json
 import re
 from dataclasses import dataclass
 
-from agents.ranker_agent import RankedCandidate, run_local_ranking
+from agents.ranker_agent import RankedCandidate
 from app.config import Settings, get_settings
 from llm.prompts import build_rerank_messages
 from memory.sqlite_store import SQLiteStore
-from models.recommendation import Recommendation, RecommendationCard, RerankResponse
+from models.recommendation import RankingRun, Recommendation, RecommendationCard, RerankResponse
 from models.user_profile import UserProfile
 
 
@@ -49,6 +49,7 @@ class LLMReranker:
         profile: UserProfile,
         ranked_candidates: list[RankedCandidate],
         top_k: int,
+        ranking_run: RankingRun,
     ) -> tuple[list[FinalRecommendation], str]:
         limited_candidates = ranked_candidates[: max(top_k, len(ranked_candidates))]
         if not self.settings.has_llm_credentials:
@@ -56,7 +57,7 @@ class LLMReranker:
 
         try:
             client = OpenAICompatibleClient(self.settings)
-            raw_response = client.complete(build_rerank_messages(profile, limited_candidates, top_k))
+            raw_response = client.complete(build_rerank_messages(profile, limited_candidates, top_k, ranking_run))
             parsed = _parse_rerank_response(raw_response)
             recommendations = _map_llm_selections(parsed, limited_candidates, top_k)
             if not recommendations:
@@ -75,12 +76,10 @@ class LLMReranker:
 
 
 def run_llm_reranking(
-    local_top_n: int | None = None,
+    ranking_run_id: int | None = None,
     final_top_k: int | None = None,
-    candidate_limit: int = 200,
-    include_recommended: bool = True,
     save_recommendations: bool = True,
-) -> tuple[list[FinalRecommendation], str, str]:
+) -> tuple[list[FinalRecommendation], str, RankingRun]:
     settings = get_settings()
     store = SQLiteStore(settings.database_path)
     store.init_schema()
@@ -88,24 +87,49 @@ def run_llm_reranking(
     if profile is None:
         raise RuntimeError("No user profile found. Run Profile Agent first.")
 
-    ranked, embedding_backend = run_local_ranking(
-        candidate_limit=candidate_limit,
-        top_n=local_top_n or settings.local_top_k,
-        ranking_mode="profile",
-        include_recommended=include_recommended,
-        save_local_rankings=False,
+    ranking_run = (
+        store.get_ranking_run(ranking_run_id)
+        if ranking_run_id is not None
+        else store.get_latest_ranking_run()
     )
+    if ranking_run is None:
+        raise RuntimeError("No ranking run found. Run `python -m agents.ranker_agent` first.")
+    local_rankings = store.get_local_rankings_for_run(ranking_run.id)
+    if not local_rankings:
+        raise RuntimeError(f"Ranking run {ranking_run.id} does not contain local ranking results.")
+
+    ranked: list[RankedCandidate] = []
+    for local_ranking in local_rankings:
+        if local_ranking.paper_id is None:
+            continue
+        paper = store.get_candidate_paper(local_ranking.paper_id)
+        if paper is None:
+            continue
+        ranked.append(
+            RankedCandidate(
+                paper=paper,
+                local_score=local_ranking.local_score,
+                semantic_score=local_ranking.local_score,
+                keyword_bonus=0.0,
+                rank_reason=local_ranking.reason,
+            )
+        )
+    if not ranked:
+        raise RuntimeError(f"Ranking run {ranking_run.id} has no available candidate papers.")
+
     reranker = LLMReranker(settings)
     final_recommendations, rerank_source = reranker.rerank(
         profile=profile,
         ranked_candidates=ranked,
         top_k=final_top_k or settings.final_top_k,
+        ranking_run=ranking_run,
     )
 
     if save_recommendations:
         for rank, item in enumerate(final_recommendations, start=1):
             store.save_recommendation(
                 Recommendation(
+                    ranking_run_id=ranking_run.id,
                     paper_id=item.candidate.paper.id,
                     local_score=item.candidate.local_score,
                     llm_score=item.llm_score,
@@ -114,7 +138,7 @@ def run_llm_reranking(
                     card=item.card,
                 )
             )
-    return final_recommendations, rerank_source, embedding_backend
+    return final_recommendations, rerank_source, ranking_run
 
 
 def _parse_rerank_response(content: str) -> RerankResponse:
@@ -192,7 +216,7 @@ def _fallback_recommendations(
                     arxiv_url=candidate.paper.url,
                     one_sentence_summary=summary,
                     why_recommended=(
-                        "Selected by local semantic similarity and keyword matching "
+                        "Selected from the saved local rough ranking "
                         f"(local score {candidate.local_score:.3f})."
                     ),
                     related_user_interests=related,
@@ -214,28 +238,26 @@ def _first_sentence(text: str | None) -> str:
 
 def main() -> None:
     settings = get_settings()
-    parser = argparse.ArgumentParser(description="Rerank local paper candidates with an OpenAI-compatible LLM.")
-    parser.add_argument("--local-top-n", type=int, default=settings.local_top_k, help="Candidate count sent to reranking.")
-    parser.add_argument("--top-k", type=int, default=settings.final_top_k, help="Final recommendation count.")
-    parser.add_argument("--candidate-limit", type=int, default=200, help="Maximum stored candidates to consider.")
+    parser = argparse.ArgumentParser(description="Rerank a saved local ranking run with an OpenAI-compatible LLM.")
     parser.add_argument(
-        "--exclude-recommended",
-        action="store_true",
-        help="Filter papers already present in recommendation history before reranking.",
+        "--ranking-run-id",
+        type=int,
+        help="Saved local ranking run to consume. Defaults to the latest run.",
     )
+    parser.add_argument("--top-k", type=int, default=settings.final_top_k, help="Final recommendation count.")
     parser.add_argument("--dry-run", action="store_true", help="Do not save final recommendations.")
     args = parser.parse_args()
 
-    recommendations, source, embedding_backend = run_llm_reranking(
-        local_top_n=args.local_top_n,
+    recommendations, source, ranking_run = run_llm_reranking(
+        ranking_run_id=args.ranking_run_id,
         final_top_k=args.top_k,
-        candidate_limit=args.candidate_limit,
-        include_recommended=not args.exclude_recommended,
         save_recommendations=not args.dry_run,
     )
     print("LLM Reranker: OK")
     print(f"Rerank source: {source}")
-    print(f"Embedding backend: {embedding_backend}")
+    print(f"Ranking run id: {ranking_run.id}")
+    print(f"Ranking method: {ranking_run.ranking_method}")
+    print(f"Embedding model: {ranking_run.embedding_model}")
     print(f"Final recommendations: {len(recommendations)}")
     print(f"Saved recommendations: {not args.dry_run}")
     for index, item in enumerate(recommendations, start=1):

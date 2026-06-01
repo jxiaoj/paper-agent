@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from models.paper import Paper, PaperSource
-from models.recommendation import Feedback, FeedbackType, LocalRanking, Recommendation
+from models.recommendation import Feedback, FeedbackType, LocalRanking, RankingRun, Recommendation
 from models.user_profile import UserProfile
 
 
@@ -64,8 +64,23 @@ class SQLiteStore:
                     UNIQUE(source, external_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS ranking_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ranking_method TEXT NOT NULL,
+                    embedding_model TEXT NOT NULL DEFAULT '',
+                    candidate_limit INTEGER NOT NULL DEFAULT 0,
+                    library_limit INTEGER,
+                    top_n INTEGER NOT NULL DEFAULT 20,
+                    profile_id INTEGER,
+                    include_recommended INTEGER NOT NULL DEFAULT 0,
+                    result_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(profile_id) REFERENCES user_profile(id) ON DELETE SET NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS recommendations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ranking_run_id INTEGER,
                     paper_id INTEGER,
                     recommendation_date TEXT NOT NULL,
                     local_score REAL,
@@ -74,11 +89,13 @@ class SQLiteStore:
                     reason TEXT NOT NULL DEFAULT '',
                     card_json TEXT,
                     created_at TEXT NOT NULL,
+                    FOREIGN KEY(ranking_run_id) REFERENCES ranking_runs(id) ON DELETE SET NULL,
                     FOREIGN KEY(paper_id) REFERENCES candidate_papers(id) ON DELETE SET NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS local_rankings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ranking_run_id INTEGER,
                     paper_id INTEGER,
                     ranking_date TEXT NOT NULL,
                     ranking_method TEXT NOT NULL DEFAULT 'profile',
@@ -86,6 +103,7 @@ class SQLiteStore:
                     rank INTEGER NOT NULL,
                     reason TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
+                    FOREIGN KEY(ranking_run_id) REFERENCES ranking_runs(id) ON DELETE CASCADE,
                     FOREIGN KEY(paper_id) REFERENCES candidate_papers(id) ON DELETE SET NULL
                 );
 
@@ -143,6 +161,8 @@ class SQLiteStore:
                     ON candidate_papers(published_at);
                 CREATE INDEX IF NOT EXISTS idx_recommendations_date
                     ON recommendations(recommendation_date);
+                CREATE INDEX IF NOT EXISTS idx_ranking_runs_created_at
+                    ON ranking_runs(created_at);
                 CREATE INDEX IF NOT EXISTS idx_local_rankings_date
                     ON local_rankings(ranking_date);
                 CREATE INDEX IF NOT EXISTS idx_zotero_embedding_lookup
@@ -156,8 +176,14 @@ class SQLiteStore:
             self._migrate_user_profile_schema(connection)
             self._migrate_legacy_papers(connection)
             self._migrate_recommendation_tables(connection)
+            self._ensure_column(connection, "recommendations", "ranking_run_id", "INTEGER")
             self._ensure_column(connection, "local_rankings", "ranking_method", "TEXT NOT NULL DEFAULT 'profile'")
+            self._ensure_column(connection, "local_rankings", "ranking_run_id", "INTEGER")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_local_rankings_run ON local_rankings(ranking_run_id, rank)"
+            )
             self._migrate_rough_recommendations(connection)
+            self._migrate_unbatched_local_rankings(connection)
 
     def _ensure_column(
         self,
@@ -344,12 +370,13 @@ class SQLiteStore:
             cursor = connection.execute(
                 """
                 INSERT INTO recommendations (
-                    paper_id, recommendation_date, local_score, llm_score, rank,
+                    ranking_run_id, paper_id, recommendation_date, local_score, llm_score, rank,
                     reason, card_json, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    payload["ranking_run_id"],
                     payload["paper_id"],
                     payload["recommendation_date"],
                     payload["local_score"],
@@ -370,17 +397,53 @@ class SQLiteStore:
             ).fetchall()
         return [_recommendation_from_row(row) for row in rows]
 
+    def save_ranking_run(self, run: RankingRun) -> RankingRun:
+        payload = run.model_dump(mode="json")
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO ranking_runs (
+                    ranking_method, embedding_model, candidate_limit, library_limit,
+                    top_n, profile_id, include_recommended, result_count, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["ranking_method"],
+                    payload["embedding_model"],
+                    payload["candidate_limit"],
+                    payload["library_limit"],
+                    payload["top_n"],
+                    payload["profile_id"],
+                    int(payload["include_recommended"]),
+                    payload["result_count"],
+                    payload["created_at"],
+                ),
+            )
+            return run.model_copy(update={"id": cursor.lastrowid})
+
+    def get_ranking_run(self, ranking_run_id: int) -> RankingRun | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM ranking_runs WHERE id = ?", (ranking_run_id,)).fetchone()
+        return _ranking_run_from_row(row) if row else None
+
+    def get_latest_ranking_run(self) -> RankingRun | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM ranking_runs ORDER BY id DESC LIMIT 1").fetchone()
+        return _ranking_run_from_row(row) if row else None
+
     def save_local_ranking(self, ranking: LocalRanking) -> LocalRanking:
         payload = ranking.model_dump(mode="json")
         with self.connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO local_rankings (
-                    paper_id, ranking_date, ranking_method, local_score, rank, reason, created_at
+                    ranking_run_id, paper_id, ranking_date, ranking_method, local_score, rank, reason, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    payload["ranking_run_id"],
                     payload["paper_id"],
                     payload["ranking_date"],
                     payload["ranking_method"],
@@ -399,6 +462,21 @@ class SQLiteStore:
                 (limit,),
             ).fetchall()
         return [_local_ranking_from_row(row) for row in rows]
+
+    def get_local_rankings_for_run(self, ranking_run_id: int, limit: int | None = None) -> list[LocalRanking]:
+        query = "SELECT * FROM local_rankings WHERE ranking_run_id = ? ORDER BY rank ASC, id ASC"
+        params: list[Any] = [ranking_run_id]
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        with self.connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [_local_ranking_from_row(row) for row in rows]
+
+    def get_candidate_paper(self, paper_id: int) -> Paper | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM candidate_papers WHERE id = ?", (paper_id,)).fetchone()
+        return _candidate_paper_from_row(row) if row else None
 
     def get_user_zotero_paper_embedding(
         self,
@@ -789,6 +867,7 @@ class SQLiteStore:
             create_sql="""
                 CREATE TABLE recommendations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ranking_run_id INTEGER,
                     paper_id INTEGER,
                     recommendation_date TEXT NOT NULL,
                     local_score REAL,
@@ -797,15 +876,16 @@ class SQLiteStore:
                     reason TEXT NOT NULL DEFAULT '',
                     card_json TEXT,
                     created_at TEXT NOT NULL,
+                    FOREIGN KEY(ranking_run_id) REFERENCES ranking_runs(id) ON DELETE SET NULL,
                     FOREIGN KEY(paper_id) REFERENCES candidate_papers(id) ON DELETE SET NULL
                 )
             """,
             copy_sql="""
                 INSERT INTO recommendations (
-                    id, paper_id, recommendation_date, local_score, llm_score, rank,
+                    id, ranking_run_id, paper_id, recommendation_date, local_score, llm_score, rank,
                     reason, card_json, created_at
                 )
-                SELECT id,
+                SELECT id, NULL,
                     CASE WHEN paper_id IN (SELECT id FROM candidate_papers) THEN paper_id ELSE NULL END,
                     recommendation_date, local_score, llm_score, rank, reason, card_json, created_at
                 FROM legacy_recommendations
@@ -863,6 +943,48 @@ class SQLiteStore:
                 AND rank IS NOT NULL
             """
         )
+
+    def _migrate_unbatched_local_rankings(self, connection: sqlite3.Connection) -> None:
+        methods = connection.execute(
+            """
+            SELECT DISTINCT ranking_method
+            FROM local_rankings
+            WHERE ranking_run_id IS NULL
+            """
+        ).fetchall()
+        for row in methods:
+            ranking_method = row["ranking_method"]
+            result_count = connection.execute(
+                "SELECT COUNT(*) AS count FROM local_rankings WHERE ranking_run_id IS NULL AND ranking_method = ?",
+                (ranking_method,),
+            ).fetchone()["count"]
+            cursor = connection.execute(
+                """
+                INSERT INTO ranking_runs (
+                    ranking_method, embedding_model, candidate_limit, library_limit,
+                    top_n, profile_id, include_recommended, result_count, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    ranking_method,
+                    "legacy_unknown",
+                    0,
+                    None,
+                    result_count,
+                    None,
+                    0,
+                    result_count,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE local_rankings
+                SET ranking_run_id = ?
+                WHERE ranking_run_id IS NULL AND ranking_method = ?
+                """,
+                (cursor.lastrowid, ranking_method),
+            )
 
     def _migrate_table_with_candidate_fk(
         self,
@@ -958,6 +1080,7 @@ def _candidate_paper_from_row(row: sqlite3.Row) -> Paper:
 def _recommendation_from_row(row: sqlite3.Row) -> Recommendation:
     return Recommendation(
         id=row["id"],
+        ranking_run_id=row["ranking_run_id"],
         paper_id=row["paper_id"],
         recommendation_date=row["recommendation_date"],
         local_score=row["local_score"],
@@ -969,9 +1092,25 @@ def _recommendation_from_row(row: sqlite3.Row) -> Recommendation:
     )
 
 
+def _ranking_run_from_row(row: sqlite3.Row) -> RankingRun:
+    return RankingRun(
+        id=row["id"],
+        ranking_method=row["ranking_method"],
+        embedding_model=row["embedding_model"],
+        candidate_limit=row["candidate_limit"],
+        library_limit=row["library_limit"],
+        top_n=row["top_n"],
+        profile_id=row["profile_id"],
+        include_recommended=bool(row["include_recommended"]),
+        result_count=row["result_count"],
+        created_at=row["created_at"],
+    )
+
+
 def _local_ranking_from_row(row: sqlite3.Row) -> LocalRanking:
     return LocalRanking(
         id=row["id"],
+        ranking_run_id=row["ranking_run_id"],
         paper_id=row["paper_id"],
         ranking_date=row["ranking_date"],
         ranking_method=row["ranking_method"],

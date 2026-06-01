@@ -7,7 +7,7 @@ from app.config import get_settings
 from memory.sqlite_store import SQLiteStore
 from memory.vector_store import LocalVectorStore, cosine_similarity
 from models.paper import Paper, PaperSource
-from models.recommendation import FeedbackType, LocalRanking
+from models.recommendation import FeedbackType, LocalRanking, RankingRun
 from models.user_profile import UserProfile
 
 
@@ -154,7 +154,7 @@ def run_local_ranking(
     include_recommended: bool = False,
     save_local_rankings: bool = True,
     embedding_backend: str = "auto",
-) -> tuple[list[RankedCandidate], str]:
+) -> tuple[list[RankedCandidate], str, RankingRun | None]:
     settings = get_settings()
     store = SQLiteStore(settings.database_path)
     store.init_schema()
@@ -163,6 +163,7 @@ def run_local_ranking(
         model_name=settings.embedding_model_name,
         backend=embedding_backend,
     )
+    profile_id: int | None = None
     if ranking_mode == "library":
         library_papers = store.get_zotero_papers_with_abstract_by_date_added(limit=library_limit)
         candidate_papers = store.get_arxiv_candidates_with_abstract(limit=candidate_limit)
@@ -176,6 +177,7 @@ def run_local_ranking(
         profile = store.get_latest_user_profile()
         if profile is None:
             raise RuntimeError("No user profile found. Run `python -m agents.profile_agent --profile-mode hybrid` first.")
+        profile_id = profile.id
 
         candidate_papers = store.get_candidate_papers(limit=candidate_limit)
         if not candidate_papers:
@@ -198,10 +200,24 @@ def run_local_ranking(
             blocked_candidate_keys=blocked_keys,
         )
 
+    run: RankingRun | None = None
     if save_local_rankings:
+        run = store.save_ranking_run(
+            RankingRun(
+                ranking_method=ranking_mode,
+                embedding_model=vector_store.cache_model_name,
+                candidate_limit=candidate_limit,
+                library_limit=library_limit if ranking_mode == "library" else None,
+                top_n=top_n or settings.local_top_k,
+                profile_id=profile_id,
+                include_recommended=include_recommended if ranking_mode == "profile" else False,
+                result_count=len(ranked),
+            )
+        )
         for index, item in enumerate(ranked, start=1):
             store.save_local_ranking(
                 LocalRanking(
+                    ranking_run_id=run.id,
                     paper_id=item.paper.id,
                     ranking_method=ranking_mode,
                     local_score=item.local_score,
@@ -210,7 +226,7 @@ def run_local_ranking(
                 )
             )
 
-    return ranked, vector_store.active_backend
+    return ranked, vector_store.active_backend, run
 
 
 def time_decay_weights(corpus_size: int) -> list[float]:
@@ -289,9 +305,9 @@ def main() -> None:
     parser.add_argument(
         "--include-recommended",
         action="store_true",
-        help="Do not filter papers already present in recommendations.",
+        help="In profile mode, do not filter papers already present in recommendations.",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Rank papers without saving recommendations.")
+    parser.add_argument("--dry-run", action="store_true", help="Rank papers without saving a ranking run or results.")
     parser.add_argument(
         "--embedding-backend",
         choices=["auto", "sentence-transformers", "hashing"],
@@ -314,7 +330,7 @@ def main() -> None:
         print(profile_to_embedding_text(profile))
         return
 
-    ranked, backend = run_local_ranking(
+    ranked, backend, run = run_local_ranking(
         candidate_limit=args.candidate_limit,
         library_limit=args.library_limit,
         top_n=args.top_n,
@@ -329,6 +345,10 @@ def main() -> None:
     print(f"Ranking mode: {args.ranking_mode}")
     print(f"Ranked candidates: {len(ranked)}")
     print(f"Saved local rankings: {not args.dry_run}")
+    if run is not None:
+        print(f"Ranking run id: {run.id}")
+    else:
+        print("Ranking run id: (dry-run)")
     for index, item in enumerate(ranked, start=1):
         print(
             f"{index}. {item.paper.title} "

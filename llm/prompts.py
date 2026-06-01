@@ -1,6 +1,7 @@
 import json
 
 from agents.ranker_agent import RankedCandidate
+from models.recommendation import RankingRun
 from models.user_profile import UserProfile
 
 
@@ -14,10 +15,16 @@ def build_rerank_messages(
     profile: UserProfile,
     ranked_candidates: list[RankedCandidate],
     top_k: int,
+    ranking_run: RankingRun,
 ) -> list[dict[str, str]]:
     payload = {
         "task": f"Select and explain the best {top_k} papers for this user.",
         "privacy_note": "This is a compressed local profile, not the user's full Zotero library.",
+        "local_ranking": {
+            "run_id": ranking_run.id,
+            "ranking_method": ranking_run.ranking_method,
+            "embedding_model": ranking_run.embedding_model,
+        },
         "user_profile": {
             "research_summary": profile.research_summary,
             "explicit_interests": profile.explicit_interests,
