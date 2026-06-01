@@ -198,6 +198,45 @@ Expected behavior:
 - Without credentials, an unavailable LLM, or invalid JSON output, the command returns local Top K fallback recommendations.
 - Remove `--dry-run` to save final user-facing recommendation cards in `recommendations`, linked to their source `ranking_run_id`; module 5 rough-ranking records remain isolated in `local_rankings`.
 
+## Module 7 Daily Recommendation Workflow
+
+Run the full daily agent workflow:
+
+```bash
+python -m workflows.daily_recommendation_workflow
+```
+
+The workflow runs these steps with clear START/OK/SKIPPED/STOP logs:
+
+1. Initialize SQLite.
+2. Sync Zotero library papers.
+3. Build a user profile.
+4. Collect recent arXiv candidates.
+5. Run local rough ranking and save a `ranking_runs` batch.
+6. Run LLM reranking from that saved batch and save final recommendations.
+
+Useful local-cache test command:
+
+```bash
+python -m workflows.daily_recommendation_workflow \
+  --skip-zotero \
+  --skip-arxiv \
+  --profile-mode local \
+  --ranking-mode library \
+  --embedding-backend hashing \
+  --dry-run
+```
+
+Common options:
+
+- `--ranking-mode profile|library`: choose the module 5 rough-ranking method.
+- `--profile-mode local|hybrid|llm`: choose the profile-building method.
+- `--local-top-n 20 --final-top-k 5`: control rough-ranking and final recommendation counts.
+- `--skip-zotero` or `--skip-arxiv`: reuse local cached data if a remote service is unavailable or rate-limited.
+- `--dry-run`: generate and print recommendations without saving final rows to `recommendations`.
+
+The workflow continues with local cached Zotero/arXiv data when remote sync fails and enough local data already exists. It stops with a clear message when a critical prerequisite is missing.
+
 ## Roadmap
 
 1. Project initialization and base data models.
