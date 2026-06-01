@@ -528,22 +528,22 @@ arxiv_paper_embeddings
 
 ### 运行命令
 
-Profile 模式：
-
-```bash
-python -m agents.ranker_agent \
-  --ranking-mode profile \
-  --candidate-limit 200 \
-  --top-n 20
-```
-
-Library 模式：
+Library 模式，也是模块 5 当前默认模式：
 
 ```bash
 python -m agents.ranker_agent \
   --ranking-mode library \
   --candidate-limit 200 \
   --library-limit 500 \
+  --top-n 20
+```
+
+Profile 模式：
+
+```bash
+python -m agents.ranker_agent \
+  --ranking-mode profile \
+  --candidate-limit 200 \
   --top-n 20
 ```
 
@@ -569,7 +569,7 @@ python -m agents.ranker_agent \
 `--ranking-mode`
 
 - 可选值：`profile`、`library`。
-- 默认值：`profile`。
+- 默认值：`library`。
 
 `--include-recommended`
 

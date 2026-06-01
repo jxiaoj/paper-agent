@@ -150,7 +150,7 @@ def run_local_ranking(
     candidate_limit: int = 200,
     library_limit: int = 500,
     top_n: int | None = None,
-    ranking_mode: str = "profile",
+    ranking_mode: str = "library",
     include_recommended: bool = False,
     save_local_rankings: bool = True,
     embedding_backend: str = "auto",
@@ -299,8 +299,8 @@ def main() -> None:
     parser.add_argument(
         "--ranking-mode",
         choices=["profile", "library"],
-        default="profile",
-        help="Rank by the user profile or by time-weighted Zotero abstract similarities.",
+        default="library",
+        help="Rank by the user profile or by time-weighted Zotero abstract similarities. Default: library.",
     )
     parser.add_argument(
         "--include-recommended",

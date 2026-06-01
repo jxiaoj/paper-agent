@@ -144,27 +144,15 @@ Expected behavior:
 
 ## Module 5 Local Embedding Ranker
 
-Run local rough ranking over candidate papers:
-
-```bash
-python -m agents.ranker_agent --ranking-mode profile --candidate-limit 200 --top-n 20
-```
-
-Expected behavior:
-
-- The ranker reads the latest `user_profile`.
-- The ranker builds profile embedding text at ranking time rather than storing it in `user_profile`.
-- The ranker embeds the profile and `candidate_papers`, computes cosine similarity, adds keyword bonuses, filters already finalized recommendations and negative-feedback papers, and saves one `ranking_runs` batch plus its Top N intermediate rows in `local_rankings`.
-- The default embedding backend tries `sentence-transformers` with `EMBEDDING_MODEL_NAME`; if the package or local model is unavailable, it falls back to a deterministic local hashing embedding so the MVP still runs offline.
-
-Run time-weighted Zotero abstract content ranking:
+Run time-weighted Zotero abstract content ranking over candidate papers:
 
 ```bash
 python -m agents.ranker_agent --ranking-mode library --candidate-limit 200 --top-n 20
 ```
 
-In `library` mode:
+Expected behavior:
 
+- This is the default module 5 ranking mode.
 - Only Zotero library papers and arXiv candidates with non-empty abstracts participate.
 - Zotero papers are ordered by `date_added` descending; missing dates are placed last.
 - A recent-interest weight is computed as `1 / (1 + log10(index + 1))` and normalized to sum to `1`.
@@ -172,6 +160,19 @@ In `library` mode:
 - Abstract embeddings are cached locally in `user_zotero_paper_embeddings` and `arxiv_paper_embeddings`, keyed by paper, model, and abstract content hash.
 - This independent experimental mode does not yet filter historical recommendations or negative feedback.
 - Each non-dry-run command prints a `Ranking run id` that can be passed directly to module 6.
+
+Run profile-based rough ranking instead:
+
+```bash
+python -m agents.ranker_agent --ranking-mode profile --candidate-limit 200 --top-n 20
+```
+
+In `profile` mode:
+
+- The ranker reads the latest `user_profile`.
+- The ranker builds profile embedding text at ranking time rather than storing it in `user_profile`.
+- The ranker embeds the profile and `candidate_papers`, computes cosine similarity, adds keyword bonuses, filters already finalized recommendations and negative-feedback papers, and saves one `ranking_runs` batch plus its Top N intermediate rows in `local_rankings`.
+- The default embedding backend tries `sentence-transformers` with `EMBEDDING_MODEL_NAME`; if the package or local model is unavailable, it falls back to a deterministic local hashing embedding so the MVP still runs offline.
 
 Preview the exact profile text used for ranking:
 
