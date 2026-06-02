@@ -186,17 +186,20 @@ def _run_local_ranking(context: WorkflowContext, args: argparse.Namespace) -> st
 def _run_llm_reranking(context: WorkflowContext, args: argparse.Namespace) -> str:
     if context.ranking_run is None or context.ranking_run.id is None:
         raise WorkflowStop("No ranking run is available for LLM reranking.")
-    recommendations, source, ranking_run = run_llm_reranking(
+    recommendations, source, ranking_run, error_reason = run_llm_reranking(
         ranking_run_id=context.ranking_run.id,
         final_top_k=args.final_top_k,
         save_recommendations=not args.dry_run,
     )
     context.recommendations = recommendations
     context.rerank_source = source
-    return (
+    message = (
         f"Reranked run_id={ranking_run.id}; source={source}; "
         f"recommendations={len(recommendations)}; saved={not args.dry_run}."
     )
+    if error_reason:
+        message += f" Fallback reason: {error_reason}"
+    return message
 
 
 def _count_rows(store: SQLiteStore, table_name: str) -> int:

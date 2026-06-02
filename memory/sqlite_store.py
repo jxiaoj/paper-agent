@@ -397,6 +397,35 @@ class SQLiteStore:
             ).fetchall()
         return [_recommendation_from_row(row) for row in rows]
 
+    def list_recommendation_runs(self, limit: int = 20) -> list[RankingRun]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT ranking_runs.*
+                FROM ranking_runs
+                JOIN recommendations ON recommendations.ranking_run_id = ranking_runs.id
+                GROUP BY ranking_runs.id
+                ORDER BY ranking_runs.id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_ranking_run_from_row(row) for row in rows]
+
+    def list_recommendations_for_run(self, ranking_run_id: int, limit: int = 20) -> list[Recommendation]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM recommendations
+                WHERE ranking_run_id = ?
+                ORDER BY rank ASC, id ASC
+                LIMIT ?
+                """,
+                (ranking_run_id, limit),
+            ).fetchall()
+        return [_recommendation_from_row(row) for row in rows]
+
     def save_ranking_run(self, run: RankingRun) -> RankingRun:
         payload = run.model_dump(mode="json")
         with self.connect() as connection:

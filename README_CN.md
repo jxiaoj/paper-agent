@@ -741,6 +741,8 @@ local_fallback_no_credentials
 local_fallback_llm_error
 ```
 
+如果发生 fallback，命令会打印脱敏后的 `Fallback reason`，方便排查 API Key、Base URL、模型名、网络连接或 JSON 解析问题。
+
 检查数据库：
 
 ```sql
@@ -981,6 +983,113 @@ arXiv collection failed; continuing with ... local candidates.
 
 如果关键数据不存在，则会停止并打印明确原因。
 
+如果 LLM 精排失败，workflow 不会中断，会回退到本地 Top K，并在日志中打印脱敏后的 `Fallback reason`。
+
+## 模块 8：Streamlit 本地 UI
+
+### 功能
+
+提供适合比赛 demo 的本地 Web UI，用于配置参数、查看用户画像、运行完整推荐 workflow、查看推荐卡片并提交反馈。
+
+### 需要的数据
+
+启动 UI 本身只需要安装依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+如果要完整运行推荐，需要前面模块所需的配置和数据：
+
+- `.env` 中的 Zotero 配置。
+- `.env` 中的 LLM 配置。
+- arXiv 网络访问。
+- 或者本地已有 `user_library_papers` 和 `candidate_papers`，并在 UI 中选择跳过同步。
+
+### 生成的数据
+
+根据用户操作，UI 会写入或更新：
+
+- `.env`
+- `user_profile`
+- `ranking_runs`
+- `local_rankings`
+- `recommendations`
+- `feedback`
+
+### 运行命令
+
+```bash
+streamlit run app/ui_streamlit.py
+```
+
+启动后访问命令行输出的本地地址，通常是：
+
+```text
+http://localhost:8501
+```
+
+### 页面说明
+
+`配置`
+
+- 编辑 LLM Base URL、LLM Model、LLM API Key。
+- 编辑 Zotero User ID、Zotero API Key、Zotero Library Type。
+- 编辑研究兴趣、arXiv categories、lookback days、max results。
+- 编辑 embedding model、local top K、final top K、database path。
+- API key 输入框留空时，会保留 `.env` 中已有密钥。
+
+`用户画像`
+
+- 展示最新 `user_profile`。
+- 展示显式兴趣、推断关键词、研究总结、代表性论文和 Zotero 文献数量。
+- 支持重新构建画像。
+
+`运行推荐`
+
+- 在 UI 中运行模块 7 workflow。
+- 支持选择是否跳过 Zotero 同步、是否跳过 arXiv 拉取。
+- 支持选择 `profile_mode`、`ranking_mode`、`embedding_backend`。
+- 支持设置 `local_top_n`、`final_top_k`、`candidate_limit`、`library_limit`。
+- 支持 `dry-run`，即只生成和展示结果，不保存最终 recommendations。
+
+`今日推荐`
+
+- 展示已保存的推荐卡片。
+- 卡片包含 title、authors、summary、why recommended、priority、arXiv link、local score、LLM score、ranking run id。
+- 支持反馈按钮：`like`、`dislike`、`save`、`not_relevant`、`already_read`。
+- 反馈写入 SQLite 的 `feedback` 表。
+
+### 验收方法
+
+启动 UI：
+
+```bash
+streamlit run app/ui_streamlit.py
+```
+
+验收重点：
+
+1. 可以打开本地页面。
+2. 可以在配置页编辑并保存参数。
+3. 可以在用户画像页看到最新画像，或重新构建画像。
+4. 可以在运行推荐页点击按钮执行 workflow。
+5. 可以在今日推荐页看到推荐卡片。
+6. 点击反馈按钮后，数据库中新增反馈记录。
+
+检查反馈：
+
+```bash
+sqlite3 data/local.db
+```
+
+```sql
+SELECT id, recommendation_id, paper_id, feedback_type, note, created_at
+FROM feedback
+ORDER BY id DESC
+LIMIT 5;
+```
+
 ## 推荐的模块验收顺序
 
 首次运行建议按顺序验收：
@@ -993,6 +1102,7 @@ python -m agents.profile_agent --profile-mode local
 python -m agents.ranker_agent --ranking-mode library --top-n 20
 python -m llm.client --ranking-run-id <上一步输出的 run id> --top-k 5 --dry-run
 python -m workflows.daily_recommendation_workflow --skip-zotero --skip-arxiv --dry-run
+streamlit run app/ui_streamlit.py
 ```
 
 确认无误后，再运行完整每日 workflow：

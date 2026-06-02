@@ -196,7 +196,7 @@ Expected behavior:
 - Either a `profile` run or a `library` run can be passed to the same LLM reranker.
 - The LLM receives only the compressed research summary, interest keywords, and candidate paper metadata; it does not receive the full Zotero library.
 - With valid LLM configuration, it returns structured recommendation cards with a rerank score, one-sentence summary, recommendation reason, related interests, and reading priority.
-- Without credentials, an unavailable LLM, or invalid JSON output, the command returns local Top K fallback recommendations.
+- Without credentials, an unavailable LLM, or invalid JSON output, the command returns local Top K fallback recommendations and prints a sanitized fallback reason.
 - Remove `--dry-run` to save final user-facing recommendation cards in `recommendations`, linked to their source `ranking_run_id`; module 5 rough-ranking records remain isolated in `local_rankings`.
 
 ## Module 7 Daily Recommendation Workflow
@@ -236,7 +236,24 @@ Common options:
 - `--skip-zotero` or `--skip-arxiv`: reuse local cached data if a remote service is unavailable or rate-limited.
 - `--dry-run`: generate and print recommendations without saving final rows to `recommendations`.
 
-The workflow continues with local cached Zotero/arXiv data when remote sync fails and enough local data already exists. It stops with a clear message when a critical prerequisite is missing.
+The workflow continues with local cached Zotero/arXiv data when remote sync fails and enough local data already exists. It stops with a clear message when a critical prerequisite is missing. If LLM reranking falls back to local recommendations, the workflow log prints a sanitized fallback reason to help debug API configuration or response-format issues.
+
+## Module 8 Streamlit Local UI
+
+Start the local demo UI:
+
+```bash
+streamlit run app/ui_streamlit.py
+```
+
+Pages:
+
+- `Configuration`: edit local `.env` settings such as LLM, Zotero, research interests, arXiv categories, embedding model, and Top K values. Existing API keys are not shown in plain text; leaving a key field blank keeps the current value.
+- `User Profile`: inspect the latest `user_profile` and rebuild it with `local`, `hybrid`, or `llm` profile mode.
+- `Run Recommendations`: run the module 7 workflow from the UI, with controls for Zotero/arXiv sync, ranking mode, embedding backend, candidate limits, and dry-run mode.
+- `Today Recommendations`: display saved recommendation cards and submit feedback buttons: like, dislike, save, not relevant, and already read.
+
+Feedback submitted in the UI is saved to the local `feedback` table.
 
 ## Roadmap
 

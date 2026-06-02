@@ -50,10 +50,14 @@ class LLMReranker:
         ranked_candidates: list[RankedCandidate],
         top_k: int,
         ranking_run: RankingRun,
-    ) -> tuple[list[FinalRecommendation], str]:
+    ) -> tuple[list[FinalRecommendation], str, str]:
         limited_candidates = ranked_candidates[: max(top_k, len(ranked_candidates))]
         if not self.settings.has_llm_credentials:
-            return _fallback_recommendations(profile, limited_candidates, top_k), "local_fallback_no_credentials"
+            return (
+                _fallback_recommendations(profile, limited_candidates, top_k),
+                "local_fallback_no_credentials",
+                "LLM_API_KEY is not configured.",
+            )
 
         try:
             client = OpenAICompatibleClient(self.settings)
@@ -70,16 +74,20 @@ class LLMReranker:
                 recommendations.extend(
                     _fallback_recommendations(profile, remaining, top_k - len(recommendations))
                 )
-            return recommendations[:top_k], "llm"
-        except Exception:
-            return _fallback_recommendations(profile, limited_candidates, top_k), "local_fallback_llm_error"
+            return recommendations[:top_k], "llm", ""
+        except Exception as exc:
+            return (
+                _fallback_recommendations(profile, limited_candidates, top_k),
+                "local_fallback_llm_error",
+                _safe_error_message(exc),
+            )
 
 
 def run_llm_reranking(
     ranking_run_id: int | None = None,
     final_top_k: int | None = None,
     save_recommendations: bool = True,
-) -> tuple[list[FinalRecommendation], str, RankingRun]:
+) -> tuple[list[FinalRecommendation], str, RankingRun, str]:
     settings = get_settings()
     store = SQLiteStore(settings.database_path)
     store.init_schema()
@@ -118,7 +126,7 @@ def run_llm_reranking(
         raise RuntimeError(f"Ranking run {ranking_run.id} has no available candidate papers.")
 
     reranker = LLMReranker(settings)
-    final_recommendations, rerank_source = reranker.rerank(
+    final_recommendations, rerank_source, error_reason = reranker.rerank(
         profile=profile,
         ranked_candidates=ranked,
         top_k=final_top_k or settings.final_top_k,
@@ -138,7 +146,16 @@ def run_llm_reranking(
                     card=item.card,
                 )
             )
-    return final_recommendations, rerank_source, ranking_run
+    return final_recommendations, rerank_source, ranking_run, error_reason
+
+
+def _safe_error_message(exc: Exception) -> str:
+    message = str(exc) or exc.__class__.__name__
+    message = re.sub(r"(?i)(api[_-]?key|authorization|bearer)\s*[:=]\s*['\"]?[^\\s,'\"]+", r"\1=[redacted]", message)
+    message = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-[redacted]", message)
+    message = re.sub(r"Bearer\s+[A-Za-z0-9._-]+", "Bearer [redacted]", message)
+    collapsed = re.sub(r"\s+", " ", message).strip()
+    return f"{exc.__class__.__name__}: {collapsed[:500]}"
 
 
 def _parse_rerank_response(content: str) -> RerankResponse:
@@ -248,7 +265,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Do not save final recommendations.")
     args = parser.parse_args()
 
-    recommendations, source, ranking_run = run_llm_reranking(
+    recommendations, source, ranking_run, error_reason = run_llm_reranking(
         ranking_run_id=args.ranking_run_id,
         final_top_k=args.top_k,
         save_recommendations=not args.dry_run,
@@ -258,6 +275,8 @@ def main() -> None:
     print(f"Ranking run id: {ranking_run.id}")
     print(f"Ranking method: {ranking_run.ranking_method}")
     print(f"Embedding model: {ranking_run.embedding_model}")
+    if error_reason:
+        print(f"Fallback reason: {error_reason}")
     print(f"Final recommendations: {len(recommendations)}")
     print(f"Saved recommendations: {not args.dry_run}")
     for index, item in enumerate(recommendations, start=1):
