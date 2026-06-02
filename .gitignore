@@ -7,3 +7,4 @@ data/*.sqlite
 data/*.sqlite3
 .pytest_cache/
 .streamlit/secrets.toml
+PROJECT_BUILD_PROMPT.txt
