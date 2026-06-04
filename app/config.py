@@ -1,3 +1,4 @@
+import tomllib
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -6,8 +7,38 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
+PROJECT_CONFIG_PATH = Path("project_config.toml")
+PROJECT_CONFIG_ALIASES = {
+    "database_path": "DATABASE_PATH",
+    "embedding_model_name": "EMBEDDING_MODEL_NAME",
+    "local_top_k": "LOCAL_TOP_K",
+    "final_top_k": "FINAL_TOP_K",
+    "profile_mode": "PROFILE_MODE",
+    "profile_max_papers": "PROFILE_MAX_PAPERS",
+    "profile_top_keywords": "PROFILE_TOP_KEYWORDS",
+    "profile_representative_count": "PROFILE_REPRESENTATIVE_COUNT",
+    "zotero_max_items": "ZOTERO_MAX_ITEMS",
+    "ranking_mode": "RANKING_MODE",
+    "embedding_backend": "EMBEDDING_BACKEND",
+    "candidate_limit": "CANDIDATE_LIMIT",
+    "library_limit": "LIBRARY_LIMIT",
+}
+
+
+def load_project_config(path: Path = PROJECT_CONFIG_PATH) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    with path.open("rb") as file:
+        raw_config = tomllib.load(file)
+    return {
+        alias: raw_config[key]
+        for key, alias in PROJECT_CONFIG_ALIASES.items()
+        if key in raw_config
+    }
+
+
 class Settings(BaseSettings):
-    """Runtime settings loaded from environment variables or a local .env file."""
+    """Runtime settings loaded from .env plus internal project_config.toml defaults."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -47,6 +78,15 @@ class Settings(BaseSettings):
     )
     local_top_k: int = Field(default=20, alias="LOCAL_TOP_K")
     final_top_k: int = Field(default=5, alias="FINAL_TOP_K")
+    profile_mode: str = Field(default="hybrid", alias="PROFILE_MODE")
+    profile_max_papers: int = Field(default=200, alias="PROFILE_MAX_PAPERS")
+    profile_top_keywords: int = Field(default=12, alias="PROFILE_TOP_KEYWORDS")
+    profile_representative_count: int = Field(default=5, alias="PROFILE_REPRESENTATIVE_COUNT")
+    zotero_max_items: int = Field(default=100, alias="ZOTERO_MAX_ITEMS")
+    ranking_mode: str = Field(default="library", alias="RANKING_MODE")
+    embedding_backend: str = Field(default="auto", alias="EMBEDDING_BACKEND")
+    candidate_limit: int = Field(default=200, alias="CANDIDATE_LIMIT")
+    library_limit: int = Field(default=500, alias="LIBRARY_LIMIT")
 
     @field_validator("user_interest_keywords", "arxiv_categories", "zotero_selected_collections", mode="before")
     @classmethod
@@ -72,6 +112,30 @@ class Settings(BaseSettings):
             raise ValueError("ZOTERO_ANALYSIS_SCOPE must be 'all' or 'selected'.")
         return normalized
 
+    @field_validator("profile_mode")
+    @classmethod
+    def validate_profile_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"local", "hybrid", "llm"}:
+            raise ValueError("profile_mode must be 'local', 'hybrid', or 'llm'.")
+        return normalized
+
+    @field_validator("ranking_mode")
+    @classmethod
+    def validate_ranking_mode(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"library", "profile"}:
+            raise ValueError("ranking_mode must be 'library' or 'profile'.")
+        return normalized
+
+    @field_validator("embedding_backend")
+    @classmethod
+    def validate_embedding_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"auto", "sentence-transformers", "hashing"}:
+            raise ValueError("embedding_backend must be 'auto', 'sentence-transformers', or 'hashing'.")
+        return normalized
+
     @property
     def has_llm_credentials(self) -> bool:
         return bool(self.llm_api_key.strip())
@@ -89,4 +153,4 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    return Settings(**load_project_config())

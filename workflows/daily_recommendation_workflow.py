@@ -255,15 +255,25 @@ def _parse_categories(value: str) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     settings = get_settings()
     parser = argparse.ArgumentParser(description="Run the full daily academic paper recommendation workflow.")
-    parser.add_argument("--zotero-max-items", type=int, default=100, help="Maximum Zotero items to sync.")
+    parser.add_argument("--zotero-max-items", type=int, default=settings.zotero_max_items, help="Maximum Zotero items to sync.")
     parser.add_argument("--skip-zotero", action="store_true", help="Reuse local Zotero data without remote sync.")
-    parser.add_argument("--profile-max-papers", type=int, default=200, help="Maximum Zotero papers used for profile.")
-    parser.add_argument("--top-keywords", type=int, default=12, help="Number of profile keywords to keep.")
-    parser.add_argument("--representative-count", type=int, default=5, help="Representative papers kept in profile.")
+    parser.add_argument(
+        "--profile-max-papers",
+        type=int,
+        default=settings.profile_max_papers,
+        help="Maximum Zotero papers used for profile.",
+    )
+    parser.add_argument("--top-keywords", type=int, default=settings.profile_top_keywords, help="Number of profile keywords to keep.")
+    parser.add_argument(
+        "--representative-count",
+        type=int,
+        default=settings.profile_representative_count,
+        help="Representative papers kept in profile.",
+    )
     parser.add_argument(
         "--profile-mode",
         choices=["local", "hybrid", "llm"],
-        default="hybrid",
+        default=settings.profile_mode,
         help="Profile construction mode.",
     )
     parser.add_argument(
@@ -280,11 +290,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ranking-mode",
         choices=["profile", "library"],
-        default="library",
+        default=settings.ranking_mode,
         help="Local rough-ranking strategy.",
     )
-    parser.add_argument("--candidate-limit", type=int, default=200)
-    parser.add_argument("--library-limit", type=int, default=500)
+    parser.add_argument("--candidate-limit", type=int, default=settings.candidate_limit)
+    parser.add_argument("--library-limit", type=int, default=settings.library_limit)
     parser.add_argument("--local-top-n", type=int, default=settings.local_top_k)
     parser.add_argument("--final-top-k", type=int, default=settings.final_top_k)
     parser.add_argument(
@@ -295,7 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--embedding-backend",
         choices=["auto", "sentence-transformers", "hashing"],
-        default="auto",
+        default=settings.embedding_backend,
         help="Embedding backend for local rough ranking.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Do not save final recommendations.")

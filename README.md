@@ -51,6 +51,7 @@ cp .env.example .env
 ```
 
 Edit `.env` with your local settings. Do not commit `.env`.
+Internal developer-tunable defaults such as the SQLite path, embedding model, profile-building defaults, workflow ranking defaults, local Top K, and final Top K live in `project_config.toml`.
 
 ## Module 0 Health Check
 
@@ -180,7 +181,7 @@ In `profile` mode:
 - The ranker reads the latest `user_profile`.
 - The ranker builds profile embedding text at ranking time rather than storing it in `user_profile`.
 - The ranker embeds the profile and `candidate_papers`, computes cosine similarity, adds keyword bonuses, filters already finalized recommendations and negative-feedback papers, and saves one `ranking_runs` batch plus its Top N intermediate rows in `local_rankings`.
-- The default embedding backend tries `sentence-transformers` with `EMBEDDING_MODEL_NAME`; if the package or local model is unavailable, it falls back to a deterministic local hashing embedding so the MVP still runs offline.
+- The default embedding backend tries `sentence-transformers` with the `embedding_model_name` from `project_config.toml`; if the package or local model is unavailable, it falls back to a deterministic local hashing embedding so the MVP still runs offline.
 
 Preview the exact profile text used for ranking:
 
@@ -259,8 +260,8 @@ Pages:
 - `Configuration`: edit user-facing `.env` settings such as LLM, Zotero, research interests, and arXiv collection parameters. Existing API keys are not shown in plain text; leaving a key field blank keeps the current value. Zotero settings can use all library papers or selected folders after refreshing collection metadata.
 - Refreshing Zotero folders performs a full collection metadata sync and removes folders that no longer exist in Zotero.
 - Zotero folders in the trash are ignored when the API marks them as `deleted`.
-- `User Profile`: inspect the latest `user_profile` and rebuild it with `local`, `hybrid`, or `llm` profile mode.
-- `Run Recommendations`: run the module 7 workflow from the UI, with controls for Zotero/arXiv sync, ranking mode, embedding backend, candidate limits, and dry-run mode.
+- `User Profile`: inspect the latest `user_profile` and rebuild it with the profile defaults from `project_config.toml`.
+- `Run Recommendations`: run the module 7 workflow from the UI, with controls for Zotero/arXiv sync and dry-run mode.
 - `Today Recommendations`: display saved recommendation cards and submit feedback buttons: like, dislike, save, not relevant, and already read.
 
 Feedback submitted in the UI is saved to the local `feedback` table.

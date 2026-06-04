@@ -18,8 +18,6 @@ cp .env.example .env
 编辑 `.env`。常用配置如下：
 
 ```env
-DATABASE_PATH=data/local.db
-
 ZOTERO_USER_ID=your_zotero_user_id
 ZOTERO_API_KEY=your_zotero_api_key
 ZOTERO_LIBRARY_TYPE=user
@@ -35,13 +33,27 @@ USER_INTEREST_KEYWORDS=large language models,AI agents,model distillation
 LLM_API_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=your_api_key
 LLM_MODEL_NAME=gpt-4o-mini
-
-EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-LOCAL_TOP_K=20
-FINAL_TOP_K=5
 ```
 
 `.env` 中包含密钥，不要提交到 Git。
+
+不需要普通用户配置的内部参数集中放在 `project_config.toml`：
+
+```toml
+database_path = "data/local.db"
+embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+local_top_k = 20
+final_top_k = 5
+profile_mode = "hybrid"
+profile_max_papers = 200
+profile_top_keywords = 12
+profile_representative_count = 5
+zotero_max_items = 100
+ranking_mode = "library"
+embedding_backend = "auto"
+candidate_limit = 200
+library_limit = 500
+```
 
 ## 当前数据库设计
 
@@ -80,13 +92,13 @@ sqlite3 data/local.db
 
 ### 需要的数据
 
-不依赖外部数据。只需要 `.env` 中的：
+不依赖外部数据。SQLite 路径由 `project_config.toml` 中的 `database_path` 控制：
 
-```env
-DATABASE_PATH=data/local.db
+```toml
+database_path = "data/local.db"
 ```
 
-如果不设置，默认使用 `data/local.db`。
+默认使用 `data/local.db`。
 
 ### 生成的数据
 
@@ -162,7 +174,6 @@ ZOTERO_API_KEY=your_zotero_api_key
 ZOTERO_LIBRARY_TYPE=user
 ZOTERO_ANALYSIS_SCOPE=all
 ZOTERO_SELECTED_COLLECTIONS=
-DATABASE_PATH=data/local.db
 ```
 
 Zotero 条目中至少需要有标题。附件和笔记会被跳过。
@@ -266,7 +277,6 @@ ARXIV_LOOKBACK_DAYS=3
 ARXIV_MAX_RESULTS=50
 ARXIV_REQUEST_DELAY_SECONDS=3
 ARXIV_NUM_RETRIES=1
-DATABASE_PATH=data/local.db
 ```
 
 ### 生成的数据
@@ -582,7 +592,7 @@ python -m agents.ranker_agent \
 `--top-n`
 
 - 含义：保存多少条本地粗排结果。
-- 默认值：读取 `.env` 中的 `LOCAL_TOP_K`。
+- 默认值：读取 `project_config.toml` 中的 `local_top_k`。
 - 配置默认值：`20`。
 
 `--ranking-mode`
@@ -724,7 +734,7 @@ python -m llm.client --ranking-run-id 3 --top-k 5 --dry-run
 `--top-k`
 
 - 含义：最终输出或保存多少条推荐。
-- 默认值：读取 `.env` 中的 `FINAL_TOP_K`。
+- 默认值：读取 `project_config.toml` 中的 `final_top_k`。
 - 配置默认值：`5`。
 
 `--dry-run`
@@ -925,13 +935,13 @@ python -m workflows.daily_recommendation_workflow \
 `--local-top-n`
 
 - 含义：模块 5 保存多少条粗排结果。
-- 默认值：读取 `.env` 中的 `LOCAL_TOP_K`。
+- 默认值：读取 `project_config.toml` 中的 `local_top_k`。
 - 配置默认值：`20`。
 
 `--final-top-k`
 
 - 含义：模块 6 最终输出或保存多少条推荐。
-- 默认值：读取 `.env` 中的 `FINAL_TOP_K`。
+- 默认值：读取 `project_config.toml` 中的 `final_top_k`。
 - 配置默认值：`5`。
 
 `--include-recommended`
@@ -1071,8 +1081,6 @@ http://localhost:8501
 
 - 在 UI 中运行模块 7 workflow。
 - 支持选择是否跳过 Zotero 同步、是否跳过 arXiv 拉取。
-- 支持选择 `profile_mode`、`ranking_mode`、`embedding_backend`。
-- 支持设置 `local_top_n`、`final_top_k`、`candidate_limit`、`library_limit`。
 - 支持 `dry-run`，即只生成和展示结果，不保存最终 recommendations。
 
 `今日推荐`

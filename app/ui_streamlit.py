@@ -183,6 +183,7 @@ def render_config_page() -> None:
 
 def render_profile_page() -> None:
     st.subheader("用户画像")
+    settings = get_settings()
     store = get_store()
     store.init_schema()
 
@@ -213,10 +214,10 @@ def render_profile_page() -> None:
     if submitted:
         with st.spinner("正在构建用户画像..."):
             profile = build_and_save_profile(
-                max_papers=200,
-                top_keywords=12,
-                representative_count=5,
-                profile_mode="hybrid",
+                max_papers=settings.profile_max_papers,
+                top_keywords=settings.profile_top_keywords,
+                representative_count=settings.profile_representative_count,
+                profile_mode=settings.profile_mode,
             )
         st.success(f"已保存用户画像：id={profile.id}")
         st.rerun()
@@ -227,52 +228,36 @@ def render_workflow_page() -> None:
     settings = get_settings()
 
     with st.form("workflow_form"):
-        col_sync, col_profile, col_rank = st.columns(3)
+        col_sync, col_option = st.columns(2)
         with col_sync:
             skip_zotero = st.checkbox("跳过 Zotero 同步", value=False)
             skip_arxiv = st.checkbox("跳过 arXiv 拉取", value=False)
-            zotero_max_items = st.number_input("Zotero Max Items", min_value=1, value=100)
-            arxiv_max_results = st.number_input("arXiv Max Results", min_value=1, value=settings.arxiv_max_results)
-            lookback_days = st.number_input("Lookback Days", min_value=0, value=settings.arxiv_lookback_days)
-        with col_profile:
-            profile_mode = st.selectbox("Profile Mode", ["local", "hybrid", "llm"], index=1)
-            profile_max_papers = st.number_input("Profile Max Papers", min_value=1, value=200)
-            top_keywords = st.number_input("Top Keywords", min_value=1, value=12)
-            representative_count = st.number_input("Representative Count", min_value=1, value=5)
-        with col_rank:
-            ranking_mode = st.selectbox("Ranking Mode", ["library", "profile"], index=0)
-            embedding_backend = st.selectbox("Embedding Backend", ["auto", "sentence-transformers", "hashing"], index=0)
-            candidate_limit = st.number_input("Candidate Limit", min_value=1, value=200)
-            library_limit = st.number_input("Library Limit", min_value=1, value=500)
-            local_top_n = st.number_input("Local Top N", min_value=1, value=settings.local_top_k)
-            final_top_k = st.number_input("Final Top K", min_value=1, value=settings.final_top_k)
+        with col_option:
+            dry_run = st.checkbox("Dry Run，不保存最终推荐", value=False)
 
-        categories_text = st.text_input("arXiv Categories", value=",".join(settings.arxiv_categories))
-        dry_run = st.checkbox("Dry Run，不保存最终推荐", value=False)
-        include_recommended = st.checkbox("Profile 模式允许已推荐论文再次参与", value=False)
         submitted = st.form_submit_button("运行完整推荐 workflow", type="primary")
 
     if submitted:
         args = argparse.Namespace(
-            zotero_max_items=int(zotero_max_items),
+            zotero_max_items=settings.zotero_max_items,
             skip_zotero=skip_zotero,
-            profile_max_papers=int(profile_max_papers),
-            top_keywords=int(top_keywords),
-            representative_count=int(representative_count),
-            profile_mode=profile_mode,
-            categories=[category.strip() for category in categories_text.split(",") if category.strip()],
-            lookback_days=int(lookback_days),
-            arxiv_max_results=int(arxiv_max_results),
+            profile_max_papers=settings.profile_max_papers,
+            top_keywords=settings.profile_top_keywords,
+            representative_count=settings.profile_representative_count,
+            profile_mode=settings.profile_mode,
+            categories=settings.arxiv_categories,
+            lookback_days=settings.arxiv_lookback_days,
+            arxiv_max_results=settings.arxiv_max_results,
             arxiv_request_delay_seconds=settings.arxiv_request_delay_seconds,
             arxiv_retries=settings.arxiv_num_retries,
             skip_arxiv=skip_arxiv,
-            ranking_mode=ranking_mode,
-            candidate_limit=int(candidate_limit),
-            library_limit=int(library_limit),
-            local_top_n=int(local_top_n),
-            final_top_k=int(final_top_k),
-            include_recommended=include_recommended,
-            embedding_backend=embedding_backend,
+            ranking_mode=settings.ranking_mode,
+            candidate_limit=settings.candidate_limit,
+            library_limit=settings.library_limit,
+            local_top_n=settings.local_top_k,
+            final_top_k=settings.final_top_k,
+            include_recommended=False,
+            embedding_backend=settings.embedding_backend,
             dry_run=dry_run,
         )
         log_buffer = io.StringIO()

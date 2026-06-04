@@ -1,0 +1,58 @@
+# Internal project defaults.
+# These options are intentionally kept out of .env so regular users do not
+# need to configure implementation details.
+
+# SQLite database file used by all modules.
+database_path = "data/local.db"
+
+# Local embedding model name used by the ranker and embedding cache.
+# The code falls back to hashing embeddings if sentence-transformers or the
+# configured model is unavailable.
+embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Number of rough-ranked papers saved by module 5 when no CLI override is used.
+local_top_k = 20
+
+# Number of final recommendation cards saved by module 6/7 when no CLI override
+# is used.
+final_top_k = 5
+
+# User profile construction mode.
+# Available values:
+# - "local": rule-based profile only
+# - "hybrid": combine local rules with LLM-generated profile fields
+# - "llm": use LLM-generated profile fields when available
+profile_mode = "hybrid"
+
+# Maximum number of Zotero library papers used to build the user profile.
+profile_max_papers = 200
+
+# Maximum number of inferred keywords saved in the user profile.
+profile_top_keywords = 12
+
+# Maximum number of representative Zotero papers saved in the user profile.
+profile_representative_count = 5
+
+# Maximum number of Zotero items fetched during one workflow sync.
+zotero_max_items = 100
+
+# Local rough-ranking strategy used by the workflow.
+# Available values:
+# - "library": rank candidates by semantic similarity to Zotero paper abstracts
+# - "profile": rank candidates by semantic similarity to the user profile
+ranking_mode = "library"
+
+# Embedding backend used by local rough ranking.
+# Available values:
+# - "auto": try sentence-transformers first, then fall back to hashing
+# - "sentence-transformers": require sentence-transformers/local model
+# - "hashing": deterministic local hashing embeddings
+embedding_backend = "auto"
+
+# Maximum number of candidate papers loaded from candidate_papers for rough
+# ranking.
+candidate_limit = 200
+
+# Maximum number of Zotero papers with abstracts used by library-mode rough
+# ranking.
+library_limit = 500
