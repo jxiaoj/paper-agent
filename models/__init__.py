@@ -1,4 +1,4 @@
-from .paper import Paper, PaperSource
+from .paper import Paper, PaperSource, ZoteroCollection
 from .recommendation import Feedback, FeedbackType, LocalRanking, RankingRun, Recommendation, RecommendationCard, RerankedPaper, RerankResponse
 from .user_profile import UserProfile
 
@@ -9,6 +9,7 @@ __all__ = [
     "RankingRun",
     "Paper",
     "PaperSource",
+    "ZoteroCollection",
     "Recommendation",
     "RecommendationCard",
     "RerankedPaper",

@@ -54,6 +54,7 @@ data/local.db
 核心表：
 
 - `user_library_papers`：用户已有文献库，当前主要来自 Zotero。
+- `zotero_collections`：Zotero 文件夹元数据，用于 UI 展示可读文件夹名，并通过稳定的 collection key 过滤论文。
 - `candidate_papers`：待推荐候选论文，当前主要来自 arXiv。
 - `user_profile`：用户研究兴趣画像。
 - `ranking_runs`：模块 5 每次粗排运行的批次记录。
@@ -159,6 +160,8 @@ SELECT COUNT(*) FROM user_profile;
 ZOTERO_USER_ID=your_zotero_user_id
 ZOTERO_API_KEY=your_zotero_api_key
 ZOTERO_LIBRARY_TYPE=user
+ZOTERO_ANALYSIS_SCOPE=all
+ZOTERO_SELECTED_COLLECTIONS=
 DATABASE_PATH=data/local.db
 ```
 
@@ -170,6 +173,7 @@ Zotero 条目中至少需要有标题。附件和笔记会被跳过。
 
 ```text
 user_library_papers
+zotero_collections
 ```
 
 关键字段包括：
@@ -187,6 +191,8 @@ user_library_papers
 - `date_modified`
 
 同一个 Zotero 条目通过 `UNIQUE(source, external_id)` 去重更新。
+
+`collections` 保存的是 Zotero collection key，不是文件夹名。`zotero_collections` 保存 collection key 对应的文件夹名和父文件夹 key，供 UI 展示与筛选使用。
 
 ### 运行命令
 
@@ -387,6 +393,16 @@ HTTP 429
 user_library_papers
 ```
 
+如果 `.env` 中配置：
+
+```env
+ZOTERO_ANALYSIS_SCOPE=selected
+ZOTERO_SELECTED_COLLECTIONS=collection_key_1,collection_key_2
+```
+
+则模块 4 只使用这些 Zotero 文件夹中的论文构建画像；默认 `all` 使用全部 Zotero 文献。
+如果选择的是父文件夹，会同时包含其子文件夹中的论文。
+
 建议 `.env` 中配置：
 
 ```env
@@ -509,6 +525,9 @@ user_library_papers
 ```
 
 且 `library` 模式只使用摘要不为空的 Zotero 文献和 arXiv 候选论文。
+
+如果 `.env` 中 `ZOTERO_ANALYSIS_SCOPE=selected`，则 `library` 模式只使用选中文件夹中摘要不为空的 Zotero 文献。
+如果选择的是父文件夹，会同时包含其子文件夹中的论文。
 
 ### 生成的数据
 
@@ -1035,6 +1054,10 @@ http://localhost:8501
 
 - 编辑 LLM Base URL、LLM Model、LLM API Key。
 - 编辑 Zotero User ID、Zotero API Key、Zotero Library Type。
+- 支持刷新 Zotero 文件夹列表，并选择使用全部 Zotero 文献或只使用勾选文件夹。
+- 刷新 Zotero 文件夹列表会全量同步 collection 元数据，并清理 Zotero 中已经删除的文件夹。
+- 如果 Zotero API 标记文件夹为 `deleted`，UI 会忽略该回收站文件夹。
+- 勾选父文件夹时，模块 4 和模块 5 会同时使用其子文件夹中的论文。
 - 编辑研究兴趣、arXiv categories、lookback days、max results。
 - 编辑 embedding model、local top K、final top K、database path。
 - API key 输入框留空时，会保留 `.env` 中已有密钥。

@@ -13,7 +13,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agents.profile_agent import build_and_save_profile
 from app.config import get_settings
+from connectors.zotero_connector import ZoteroConfigError, save_zotero_collections
 from memory.sqlite_store import SQLiteStore
+from models.paper import ZoteroCollection
 from models.recommendation import Feedback, FeedbackType, Recommendation, RecommendationCard
 from workflows.daily_recommendation_workflow import run_daily_recommendation_workflow
 
@@ -50,8 +52,25 @@ def render_config_page() -> None:
     st.subheader("配置")
     settings = get_settings()
     env_values = read_env_file(ENV_PATH)
+    store = get_store()
+    store.init_schema()
+    collections = store.list_zotero_collections()
+    collection_counts = store.count_zotero_papers_by_collection()
 
-    with st.form("config_form"):
+    if st.button("刷新 Zotero 文件夹列表"):
+        with st.spinner("正在同步 Zotero 文件夹..."):
+            try:
+                collections = save_zotero_collections()
+            except ZoteroConfigError as exc:
+                st.error(f"Zotero 配置错误：{exc}")
+            except Exception as exc:
+                st.error(f"同步 Zotero 文件夹失败：{exc}")
+            else:
+                get_settings.cache_clear()
+                st.success(f"已同步 {len(collections)} 个 Zotero 文件夹。")
+                st.rerun()
+
+    with st.container():
         col_llm, col_zotero = st.columns(2)
         with col_llm:
             st.markdown("#### LLM")
@@ -87,6 +106,27 @@ def render_config_page() -> None:
                 ["user", "group"],
                 index=0 if env_values.get("ZOTERO_LIBRARY_TYPE", settings.zotero_library_type) != "group" else 1,
             )
+            zotero_scope = st.selectbox(
+                "Zotero 分析范围",
+                ["all", "selected"],
+                format_func=lambda value: "使用全部 Zotero 文献" if value == "all" else "只使用选中文件夹",
+                index=0 if env_values.get("ZOTERO_ANALYSIS_SCOPE", settings.zotero_analysis_scope) != "selected" else 1,
+            )
+            selected_collection_keys: list[str] = []
+            if zotero_scope == "selected":
+                if not collections:
+                    st.warning("还没有 Zotero 文件夹列表。请先点击上方“刷新 Zotero 文件夹列表”。")
+                collection_options = build_collection_options(collections, collection_counts)
+                selected_labels = st.multiselect(
+                    "选择 Zotero 文件夹",
+                    options=list(collection_options.keys()),
+                    default=[
+                        label
+                        for label, key in collection_options.items()
+                        if key in settings.zotero_selected_collections
+                    ],
+                )
+                selected_collection_keys = [collection_options[label] for label in selected_labels]
 
         st.markdown("#### 推荐参数")
         col_interest, col_arxiv = st.columns(2)
@@ -136,14 +176,19 @@ def render_config_page() -> None:
                 value=env_values.get("DATABASE_PATH", str(settings.database_path)),
             )
 
-        submitted = st.form_submit_button("保存配置", type="primary")
+        submitted = st.button("保存配置", type="primary")
 
     if submitted:
+        if zotero_scope == "selected" and not selected_collection_keys:
+            st.error("请选择至少一个 Zotero 文件夹，或切换为使用全部 Zotero 文献。")
+            return
         updates = {
             "LLM_API_BASE_URL": llm_base_url.strip(),
             "LLM_MODEL_NAME": llm_model.strip(),
             "ZOTERO_USER_ID": zotero_user_id.strip(),
             "ZOTERO_LIBRARY_TYPE": zotero_library_type,
+            "ZOTERO_ANALYSIS_SCOPE": zotero_scope,
+            "ZOTERO_SELECTED_COLLECTIONS": ",".join(selected_collection_keys),
             "USER_INTEREST_KEYWORDS": compact_csv(interests),
             "ARXIV_CATEGORIES": compact_csv(categories),
             "ARXIV_LOOKBACK_DAYS": str(int(lookback_days)),
@@ -479,6 +524,33 @@ def quote_env_value(value: str) -> str:
 
 def compact_csv(value: str) -> str:
     return ",".join(item.strip() for item in value.split(",") if item.strip())
+
+
+def build_collection_options(
+    collections: list[ZoteroCollection],
+    counts: dict[str, int],
+) -> dict[str, str]:
+    by_key = {collection.collection_key: collection for collection in collections}
+
+    def path_for(collection: ZoteroCollection) -> str:
+        names = [collection.name]
+        parent_key = collection.parent_key
+        seen = {collection.collection_key}
+        while parent_key and parent_key in by_key and parent_key not in seen:
+            parent = by_key[parent_key]
+            names.append(parent.name)
+            seen.add(parent.collection_key)
+            parent_key = parent.parent_key
+        return " / ".join(reversed(names))
+
+    options: dict[str, str] = {}
+    sorted_collections = sorted(collections, key=lambda item: path_for(item).lower())
+    for collection in sorted_collections:
+        label = f"{path_for(collection)} ({counts.get(collection.collection_key, 0)} 篇)"
+        if label in options:
+            label = f"{label} [{collection.collection_key}]"
+        options[label] = collection.collection_key
+    return options
 
 
 if __name__ == "__main__":

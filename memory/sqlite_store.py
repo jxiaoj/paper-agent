@@ -3,7 +3,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from models.paper import Paper, PaperSource
+from models.paper import Paper, PaperSource, ZoteroCollection
 from models.recommendation import Feedback, FeedbackType, LocalRanking, RankingRun, Recommendation
 from models.user_profile import UserProfile
 
@@ -43,6 +43,15 @@ class SQLiteStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(source, external_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS zotero_collections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    collection_key TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    parent_key TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS candidate_papers (
@@ -155,6 +164,8 @@ class SQLiteStore:
 
                 CREATE INDEX IF NOT EXISTS idx_user_library_source_external_id
                     ON user_library_papers(source, external_id);
+                CREATE INDEX IF NOT EXISTS idx_zotero_collections_key
+                    ON zotero_collections(collection_key);
                 CREATE INDEX IF NOT EXISTS idx_candidate_source_external_id
                     ON candidate_papers(source, external_id);
                 CREATE INDEX IF NOT EXISTS idx_candidate_published_at
@@ -274,33 +285,177 @@ class SQLiteStore:
         self,
         source: PaperSource | None = None,
         limit: int = 50,
+        collection_keys: list[str] | None = None,
     ) -> list[Paper]:
         query = "SELECT * FROM user_library_papers"
         params: list[Any] = []
+        filters: list[str] = []
         if source:
-            query += " WHERE source = ?"
+            filters.append("source = ?")
             params.append(source.value)
+        if collection_keys is not None:
+            if not collection_keys:
+                return []
+            placeholders = ",".join("?" for _ in collection_keys)
+            filters.append(f"EXISTS (SELECT 1 FROM json_each(collections_json) WHERE value IN ({placeholders}))")
+            params.extend(collection_keys)
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
         query += " ORDER BY created_at DESC, id DESC LIMIT ?"
         params.append(limit)
         with self.connect() as connection:
             rows = connection.execute(query, params).fetchall()
         return [_user_library_paper_from_row(row) for row in rows]
 
-    def get_zotero_papers_with_abstract_by_date_added(self, limit: int = 500) -> list[Paper]:
+    def get_zotero_papers_with_abstract_by_date_added(
+        self,
+        limit: int = 500,
+        collection_keys: list[str] | None = None,
+    ) -> list[Paper]:
+        filters = [
+            "source = ?",
+            "abstract IS NOT NULL",
+            "TRIM(abstract) <> ''",
+        ]
+        params: list[Any] = [PaperSource.ZOTERO.value]
+        if collection_keys is not None:
+            if not collection_keys:
+                return []
+            placeholders = ",".join("?" for _ in collection_keys)
+            filters.append(f"EXISTS (SELECT 1 FROM json_each(collections_json) WHERE value IN ({placeholders}))")
+            params.extend(collection_keys)
+        params.append(limit)
         with self.connect() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT *
                 FROM user_library_papers
-                WHERE source = ?
-                    AND abstract IS NOT NULL
-                    AND TRIM(abstract) <> ''
+                WHERE {" AND ".join(filters)}
                 ORDER BY date_added IS NULL ASC, date_added DESC, id DESC
                 LIMIT ?
                 """,
-                (PaperSource.ZOTERO.value, limit),
+                params,
             ).fetchall()
         return [_user_library_paper_from_row(row) for row in rows]
+
+    def save_zotero_collection(self, collection: ZoteroCollection) -> ZoteroCollection:
+        payload = collection.model_dump(mode="json")
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO zotero_collections (
+                    collection_key, name, parent_key, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(collection_key) DO UPDATE SET
+                    name = excluded.name,
+                    parent_key = excluded.parent_key,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    payload["collection_key"],
+                    payload["name"],
+                    payload["parent_key"],
+                    payload["created_at"],
+                    payload["updated_at"],
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM zotero_collections WHERE collection_key = ?",
+                (collection.collection_key,),
+            ).fetchone()
+        saved = _zotero_collection_from_row(row) if row else collection
+        return saved.model_copy(update={"id": saved.id or cursor.lastrowid})
+
+    def replace_zotero_collections(self, collections: list[ZoteroCollection]) -> list[ZoteroCollection]:
+        saved: list[ZoteroCollection] = []
+        current_keys = [collection.collection_key for collection in collections]
+        with self.connect() as connection:
+            for collection in collections:
+                payload = collection.model_dump(mode="json")
+                connection.execute(
+                    """
+                    INSERT INTO zotero_collections (
+                        collection_key, name, parent_key, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(collection_key) DO UPDATE SET
+                        name = excluded.name,
+                        parent_key = excluded.parent_key,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        payload["collection_key"],
+                        payload["name"],
+                        payload["parent_key"],
+                        payload["created_at"],
+                        payload["updated_at"],
+                    ),
+                )
+            if current_keys:
+                placeholders = ",".join("?" for _ in current_keys)
+                connection.execute(
+                    f"DELETE FROM zotero_collections WHERE collection_key NOT IN ({placeholders})",
+                    current_keys,
+                )
+            else:
+                connection.execute("DELETE FROM zotero_collections")
+            rows = connection.execute(
+                "SELECT * FROM zotero_collections ORDER BY name ASC, collection_key ASC"
+            ).fetchall()
+        saved = [_zotero_collection_from_row(row) for row in rows]
+        return saved
+
+    def list_zotero_collections(self) -> list[ZoteroCollection]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM zotero_collections ORDER BY name ASC, collection_key ASC"
+            ).fetchall()
+        return [_zotero_collection_from_row(row) for row in rows]
+
+    def count_zotero_papers_by_collection(self) -> dict[str, int]:
+        with self.connect() as connection:
+            collection_rows = connection.execute("SELECT * FROM zotero_collections").fetchall()
+            paper_rows = connection.execute(
+                "SELECT collections_json FROM user_library_papers WHERE source = ?",
+                (PaperSource.ZOTERO.value,),
+            ).fetchall()
+        collections = [_zotero_collection_from_row(row) for row in collection_rows]
+        paper_collection_sets = [set(_from_json(row["collections_json"], [])) for row in paper_rows]
+        return {
+            collection.collection_key: sum(
+                1
+                for paper_collections in paper_collection_sets
+                if paper_collections.intersection(self._expand_zotero_collection_keys(collections, [collection.collection_key]))
+            )
+            for collection in collections
+        }
+
+    def expand_zotero_collection_keys(self, collection_keys: list[str]) -> list[str]:
+        collections = self.list_zotero_collections()
+        return sorted(self._expand_zotero_collection_keys(collections, collection_keys))
+
+    def _expand_zotero_collection_keys(
+        self,
+        collections: list[ZoteroCollection],
+        collection_keys: list[str],
+    ) -> set[str]:
+        selected = set(collection_keys)
+        if not selected:
+            return set()
+        child_map: dict[str, list[str]] = {}
+        for collection in collections:
+            if collection.parent_key:
+                child_map.setdefault(collection.parent_key, []).append(collection.collection_key)
+        expanded = set(selected)
+        stack = list(selected)
+        while stack:
+            current = stack.pop()
+            for child_key in child_map.get(current, []):
+                if child_key not in expanded:
+                    expanded.add(child_key)
+                    stack.append(child_key)
+        return expanded
 
     def get_candidate_papers(
         self,
@@ -1080,6 +1235,17 @@ def _user_library_paper_from_row(row: sqlite3.Row) -> Paper:
         source=row["source"],
         external_id=row["external_id"],
         url=row["url"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _zotero_collection_from_row(row: sqlite3.Row) -> ZoteroCollection:
+    return ZoteroCollection(
+        id=row["id"],
+        collection_key=row["collection_key"],
+        name=row["name"],
+        parent_key=row["parent_key"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

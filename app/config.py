@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     zotero_user_id: str = Field(default="", alias="ZOTERO_USER_ID")
     zotero_api_key: str = Field(default="", alias="ZOTERO_API_KEY")
     zotero_library_type: str = Field(default="user", alias="ZOTERO_LIBRARY_TYPE")
+    zotero_analysis_scope: str = Field(default="all", alias="ZOTERO_ANALYSIS_SCOPE")
+    zotero_selected_collections: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        alias="ZOTERO_SELECTED_COLLECTIONS",
+    )
 
     database_path: Path = Field(default=Path("data/local.db"), alias="DATABASE_PATH")
     user_interest_keywords: Annotated[list[str], NoDecode] = Field(
@@ -43,7 +48,7 @@ class Settings(BaseSettings):
     local_top_k: int = Field(default=20, alias="LOCAL_TOP_K")
     final_top_k: int = Field(default=5, alias="FINAL_TOP_K")
 
-    @field_validator("user_interest_keywords", "arxiv_categories", mode="before")
+    @field_validator("user_interest_keywords", "arxiv_categories", "zotero_selected_collections", mode="before")
     @classmethod
     def parse_csv_list(cls, value: object) -> list[str]:
         if value is None:
@@ -59,6 +64,14 @@ class Settings(BaseSettings):
             return [str(item).strip() for item in value if str(item).strip()]
         raise TypeError("Expected a comma-separated string or list.")
 
+    @field_validator("zotero_analysis_scope")
+    @classmethod
+    def validate_zotero_analysis_scope(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"all", "selected"}:
+            raise ValueError("ZOTERO_ANALYSIS_SCOPE must be 'all' or 'selected'.")
+        return normalized
+
     @property
     def has_llm_credentials(self) -> bool:
         return bool(self.llm_api_key.strip())
@@ -66,6 +79,12 @@ class Settings(BaseSettings):
     @property
     def has_zotero_credentials(self) -> bool:
         return bool(self.zotero_user_id.strip() and self.zotero_api_key.strip())
+
+    @property
+    def active_zotero_collection_keys(self) -> list[str] | None:
+        if self.zotero_analysis_scope == "all":
+            return None
+        return self.zotero_selected_collections
 
 
 @lru_cache(maxsize=1)

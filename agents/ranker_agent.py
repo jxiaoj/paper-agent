@@ -165,10 +165,20 @@ def run_local_ranking(
     )
     profile_id: int | None = None
     if ranking_mode == "library":
-        library_papers = store.get_zotero_papers_with_abstract_by_date_added(limit=library_limit)
+        collection_keys = settings.active_zotero_collection_keys
+        if collection_keys == []:
+            raise RuntimeError("ZOTERO_ANALYSIS_SCOPE=selected but ZOTERO_SELECTED_COLLECTIONS is empty.")
+        if collection_keys is not None:
+            collection_keys = store.expand_zotero_collection_keys(collection_keys)
+        library_papers = store.get_zotero_papers_with_abstract_by_date_added(
+            limit=library_limit,
+            collection_keys=collection_keys,
+        )
         candidate_papers = store.get_arxiv_candidates_with_abstract(limit=candidate_limit)
         if not library_papers:
-            raise RuntimeError("No Zotero papers with abstracts found for library content ranking.")
+            if collection_keys is None:
+                raise RuntimeError("No Zotero papers with abstracts found for library content ranking.")
+            raise RuntimeError("Selected Zotero collections contain no papers with abstracts for library ranking.")
         if not candidate_papers:
             raise RuntimeError("No arXiv candidate papers with abstracts found for library content ranking.")
         ranker = LibraryContentRanker(store=store, vector_store=vector_store, top_n=top_n or settings.local_top_k)

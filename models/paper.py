@@ -43,3 +43,12 @@ class Paper(BaseModel):
             " ".join(self.categories),
         ]
         return "\n".join(part for part in parts if part.strip())
+
+
+class ZoteroCollection(BaseModel):
+    id: int | None = None
+    collection_key: str
+    name: str
+    parent_key: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

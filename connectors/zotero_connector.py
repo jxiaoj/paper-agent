@@ -4,7 +4,7 @@ from typing import Any
 
 from app.config import get_settings
 from memory.sqlite_store import SQLiteStore
-from models.paper import Paper, PaperSource
+from models.paper import Paper, PaperSource, ZoteroCollection
 
 
 class ZoteroConfigError(ValueError):
@@ -37,6 +37,22 @@ class ZoteroConnector:
         client = zotero.Zotero(self.user_id, self.library_type, self.api_key)
         raw_items = client.top(limit=max_items)
         return [paper for item in raw_items if (paper := item_to_paper(item)) is not None]
+
+    def fetch_collections(self) -> list[ZoteroCollection]:
+        try:
+            from pyzotero import zotero
+        except ImportError as exc:
+            raise RuntimeError(
+                "pyzotero is not installed. Run `pip install -r requirements.txt` inside your virtual environment."
+            ) from exc
+
+        client = zotero.Zotero(self.user_id, self.library_type, self.api_key)
+        raw_collections = client.all_collections()
+        return [
+            collection
+            for item in raw_collections
+            if (collection := item_to_collection(item)) is not None
+        ]
 
 
 def item_to_paper(item: dict[str, Any]) -> Paper | None:
@@ -71,7 +87,24 @@ def item_to_paper(item: dict[str, Any]) -> Paper | None:
     )
 
 
-def save_zotero_papers(max_items: int = 50) -> list[Paper]:
+def item_to_collection(item: dict[str, Any]) -> ZoteroCollection | None:
+    data = item.get("data", {})
+    if data.get("deleted") is True:
+        return None
+    collection_key = _clean_text(data.get("key") or item.get("key"))
+    name = _clean_text(data.get("name", ""))
+    if not collection_key or not name:
+        return None
+    raw_parent = data.get("parentCollection")
+    parent_key = _clean_text(raw_parent if raw_parent else "")
+    return ZoteroCollection(
+        collection_key=collection_key,
+        name=name,
+        parent_key=parent_key or None,
+    )
+
+
+def save_zotero_collections() -> list[ZoteroCollection]:
     settings = get_settings()
     connector = ZoteroConnector(
         user_id=settings.zotero_user_id,
@@ -80,6 +113,23 @@ def save_zotero_papers(max_items: int = 50) -> list[Paper]:
     )
     store = SQLiteStore(settings.database_path)
     store.init_schema()
+
+    collections = connector.fetch_collections()
+    return store.replace_zotero_collections(collections)
+
+
+def save_zotero_papers(max_items: int = 50, sync_collections: bool = True) -> list[Paper]:
+    settings = get_settings()
+    connector = ZoteroConnector(
+        user_id=settings.zotero_user_id,
+        api_key=settings.zotero_api_key,
+        library_type=settings.zotero_library_type,
+    )
+    store = SQLiteStore(settings.database_path)
+    store.init_schema()
+
+    if sync_collections:
+        store.replace_zotero_collections(connector.fetch_collections())
 
     papers = connector.fetch_papers(max_items=max_items)
     return [store.save_user_library_paper(paper) for paper in papers]

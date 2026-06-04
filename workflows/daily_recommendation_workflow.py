@@ -47,6 +47,9 @@ def run_daily_recommendation_workflow(args: argparse.Namespace) -> list[FinalRec
     print(f"Database: {settings.database_path}")
     print(f"Ranking mode: {args.ranking_mode}")
     print(f"Profile mode: {args.profile_mode}")
+    print(f"Zotero analysis scope: {settings.zotero_analysis_scope}")
+    if settings.zotero_analysis_scope == "selected":
+        print(f"Selected Zotero collections: {', '.join(settings.zotero_selected_collections) or '(none)'}")
     print(f"Final top K: {args.final_top_k}")
     print(f"Dry run: {args.dry_run}")
 
@@ -111,7 +114,8 @@ def _sync_zotero(context: WorkflowContext, max_items: int, skip: bool) -> str:
         return f"Skipped Zotero sync. Existing Zotero papers: {_count_zotero_papers(context.store)}."
     try:
         papers = save_zotero_papers(max_items=max_items)
-        return f"Fetched and saved {len(papers)} Zotero papers."
+        collection_count = len(context.store.list_zotero_collections())
+        return f"Fetched and saved {len(papers)} Zotero papers. Synced {collection_count} Zotero collections."
     except ZoteroConfigError as exc:
         existing_count = _count_zotero_papers(context.store)
         if existing_count > 0:

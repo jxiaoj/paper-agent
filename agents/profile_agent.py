@@ -273,7 +273,18 @@ def build_and_save_profile(
     settings = get_settings()
     store = SQLiteStore(settings.database_path)
     store.init_schema()
-    papers = store.get_user_library_papers(source=PaperSource.ZOTERO, limit=max_papers)
+    collection_keys = settings.active_zotero_collection_keys
+    if collection_keys == []:
+        raise RuntimeError("ZOTERO_ANALYSIS_SCOPE=selected but ZOTERO_SELECTED_COLLECTIONS is empty.")
+    if collection_keys is not None:
+        collection_keys = store.expand_zotero_collection_keys(collection_keys)
+    papers = store.get_user_library_papers(
+        source=PaperSource.ZOTERO,
+        limit=max_papers,
+        collection_keys=collection_keys,
+    )
+    if collection_keys is not None and not papers:
+        raise RuntimeError("Selected Zotero collections contain no papers for profile building.")
 
     agent = ProfileAgent(
         explicit_interests=settings.user_interest_keywords,
