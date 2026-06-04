@@ -208,26 +208,15 @@ def render_profile_page() -> None:
             st.write(f"- {paper.get('title', '(untitled)')}{year}")
 
     st.divider()
-    st.markdown("#### 重新构建")
-    with st.form("profile_form"):
-        col_a, col_b, col_c, col_d = st.columns(4)
-        with col_a:
-            profile_mode = st.selectbox("Profile Mode", ["local", "hybrid", "llm"], index=1)
-        with col_b:
-            max_papers = st.number_input("Max Papers", min_value=1, value=200)
-        with col_c:
-            top_keywords = st.number_input("Top Keywords", min_value=1, value=12)
-        with col_d:
-            representative_count = st.number_input("Representative Count", min_value=1, value=5)
-        submitted = st.form_submit_button("构建用户画像", type="primary")
+    submitted = st.button("重新构建用户画像", type="primary")
 
     if submitted:
         with st.spinner("正在构建用户画像..."):
             profile = build_and_save_profile(
-                max_papers=int(max_papers),
-                top_keywords=int(top_keywords),
-                representative_count=int(representative_count),
-                profile_mode=profile_mode,
+                max_papers=200,
+                top_keywords=12,
+                representative_count=5,
+                profile_mode="hybrid",
             )
         st.success(f"已保存用户画像：id={profile.id}")
         st.rerun()
