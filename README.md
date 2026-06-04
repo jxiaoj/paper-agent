@@ -256,7 +256,7 @@ streamlit run app/ui_streamlit.py
 
 Pages:
 
-- `Configuration`: edit local `.env` settings such as LLM, Zotero, research interests, arXiv categories, embedding model, and Top K values. Existing API keys are not shown in plain text; leaving a key field blank keeps the current value. Zotero settings can use all library papers or selected folders after refreshing collection metadata.
+- `Configuration`: edit user-facing `.env` settings such as LLM, Zotero, research interests, and arXiv collection parameters. Existing API keys are not shown in plain text; leaving a key field blank keeps the current value. Zotero settings can use all library papers or selected folders after refreshing collection metadata.
 - Refreshing Zotero folders performs a full collection metadata sync and removes folders that no longer exist in Zotero.
 - Zotero folders in the trash are ignored when the API marks them as `deleted`.
 - `User Profile`: inspect the latest `user_profile` and rebuild it with `local`, `hybrid`, or `llm` profile mode.

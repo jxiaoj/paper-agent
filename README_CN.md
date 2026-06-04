@@ -1059,7 +1059,6 @@ http://localhost:8501
 - 如果 Zotero API 标记文件夹为 `deleted`，UI 会忽略该回收站文件夹。
 - 勾选父文件夹时，模块 4 和模块 5 会同时使用其子文件夹中的论文。
 - 编辑研究兴趣、arXiv categories、lookback days、max results。
-- 编辑 embedding model、local top K、final top K、database path。
 - API key 输入框留空时，会保留 `.env` 中已有密钥。
 
 `用户画像`

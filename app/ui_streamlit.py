@@ -128,20 +128,17 @@ def render_config_page() -> None:
                 )
                 selected_collection_keys = [collection_options[label] for label in selected_labels]
 
-        st.markdown("#### 推荐参数")
         col_interest, col_arxiv = st.columns(2)
         with col_interest:
+            st.markdown("#### 研究兴趣")
             interests = st.text_area(
                 "研究兴趣",
                 value=env_values.get("USER_INTEREST_KEYWORDS", ",".join(settings.user_interest_keywords)),
                 height=90,
                 help="逗号分隔，例如 large language models,AI agents,model distillation",
             )
-            embedding_model = st.text_input(
-                "Embedding Model",
-                value=env_values.get("EMBEDDING_MODEL_NAME", settings.embedding_model_name),
-            )
         with col_arxiv:
+            st.markdown("#### 数据源")
             categories = st.text_input(
                 "arXiv Categories",
                 value=env_values.get("ARXIV_CATEGORIES", ",".join(settings.arxiv_categories)),
@@ -155,25 +152,6 @@ def render_config_page() -> None:
                 "arXiv Max Results",
                 min_value=1,
                 value=int(env_values.get("ARXIV_MAX_RESULTS", settings.arxiv_max_results)),
-            )
-
-        col_local, col_final, col_db = st.columns(3)
-        with col_local:
-            local_top_k = st.number_input(
-                "Local Top K",
-                min_value=1,
-                value=int(env_values.get("LOCAL_TOP_K", settings.local_top_k)),
-            )
-        with col_final:
-            final_top_k = st.number_input(
-                "Final Top K",
-                min_value=1,
-                value=int(env_values.get("FINAL_TOP_K", settings.final_top_k)),
-            )
-        with col_db:
-            database_path = st.text_input(
-                "Database Path",
-                value=env_values.get("DATABASE_PATH", str(settings.database_path)),
             )
 
         submitted = st.button("保存配置", type="primary")
@@ -193,10 +171,6 @@ def render_config_page() -> None:
             "ARXIV_CATEGORIES": compact_csv(categories),
             "ARXIV_LOOKBACK_DAYS": str(int(lookback_days)),
             "ARXIV_MAX_RESULTS": str(int(max_results)),
-            "EMBEDDING_MODEL_NAME": embedding_model.strip(),
-            "LOCAL_TOP_K": str(int(local_top_k)),
-            "FINAL_TOP_K": str(int(final_top_k)),
-            "DATABASE_PATH": database_path.strip(),
         }
         if llm_api_key.strip():
             updates["LLM_API_KEY"] = llm_api_key.strip()
