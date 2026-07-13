@@ -1092,7 +1092,7 @@ http://localhost:8501
 `今日推荐`
 
 - 展示已保存的推荐卡片。
-- 卡片包含 title、authors、summary、why recommended、priority、arXiv link、local score、LLM score、ranking run id。
+- 卡片包含 title、authors、summary、recommendation reason、priority、arXiv link。
 - 支持反馈按钮：`like`、`dislike`、`save`。
 - 反馈写入 SQLite 的 `feedback` 表。
 

@@ -300,8 +300,7 @@ def render_recommendations_page() -> None:
     recommendations = store.list_recommendations_for_run(selected_run.id, limit=100)
 
     st.caption(
-        f"当前只展示 Run {selected_run.id} 的最终推荐；卡片标题编号是页面顺序，"
-        "Original Rank 是该批次保存时的原始推荐排名。"
+        f"当前只展示 Run {selected_run.id} 的最终推荐；卡片标题编号是页面顺序。"
     )
     render_saved_recommendations(store, recommendations)
 
@@ -316,8 +315,6 @@ def render_recommendation_cards(
         card = recommendation if isinstance(recommendation, RecommendationCard) else None
         candidate = getattr(item, "candidate", None)
         paper = getattr(candidate, "paper", None)
-        local_score = getattr(candidate, "local_score", None)
-        llm_score = getattr(item, "llm_score", None)
         with st.container(border=True):
             render_card_content(
                 title=card.title if card else getattr(paper, "title", "(untitled)"),
@@ -326,10 +323,7 @@ def render_recommendation_cards(
                 why=card.why_recommended if card else "",
                 priority=card.reading_priority if card else "medium",
                 url=str(card.arxiv_url) if card and card.arxiv_url else str(getattr(paper, "url", "") or ""),
-                local_score=local_score,
-                llm_score=llm_score,
                 rank=index,
-                ranking_run_id=None,
             )
 
 
@@ -345,11 +339,7 @@ def render_saved_recommendations(store: SQLiteStore, recommendations: list[Recom
                 why=card.why_recommended if card else recommendation.reason,
                 priority=card.reading_priority if card else "medium",
                 url=str(card.arxiv_url) if card and card.arxiv_url else str(paper.url if paper and paper.url else ""),
-                local_score=recommendation.local_score,
-                llm_score=recommendation.llm_score,
                 rank=display_rank,
-                ranking_run_id=recommendation.ranking_run_id,
-                original_rank=recommendation.rank,
             )
             render_feedback_controls(store, recommendation)
 
@@ -361,33 +351,24 @@ def render_card_content(
     why: str,
     priority: str,
     url: str,
-    local_score: float | None,
-    llm_score: float | None,
     rank: int | None,
-    ranking_run_id: int | None,
-    original_rank: int | None = None,
 ) -> None:
     heading = f"{rank}. {title}" if rank else title
     st.markdown(f"### {heading}")
     if authors:
         st.caption(", ".join(authors[:8]))
-    cols = st.columns(5)
-    cols[0].metric("Priority", priority)
-    cols[1].metric("Local Score", f"{local_score:.3f}" if local_score is not None else "-")
-    cols[2].metric("LLM Score", f"{llm_score:.3f}" if llm_score is not None else "-")
-    cols[3].metric("Run ID", ranking_run_id if ranking_run_id is not None else "-")
-    cols[4].metric("Original Rank", original_rank if original_rank is not None else "-")
+    st.metric("Priority", priority)
     if summary:
+        st.markdown("**Summary:**")
         st.write(summary)
     if why:
+        st.markdown("**Recommendation reason:**")
         st.write(why)
     if url:
         st.link_button("打开论文链接", url)
 
 
 def render_feedback_controls(store: SQLiteStore, recommendation: Recommendation) -> None:
-    note_key = f"feedback_note_{recommendation.id}"
-    note = st.text_input("反馈备注", key=note_key, placeholder="可选")
     labels = [
         ("Like", FeedbackType.LIKE),
         ("Dislike", FeedbackType.DISLIKE),
@@ -401,7 +382,7 @@ def render_feedback_controls(store: SQLiteStore, recommendation: Recommendation)
                     recommendation_id=recommendation.id,
                     paper_id=recommendation.paper_id,
                     feedback_type=feedback_type,
-                    note=note,
+                    note="",
                 )
             )
             st.success(f"已记录反馈：{feedback_type.value}")

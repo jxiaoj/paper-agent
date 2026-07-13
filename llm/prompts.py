@@ -19,12 +19,6 @@ def build_rerank_messages(
 ) -> list[dict[str, str]]:
     payload = {
         "task": f"Select and explain the best {top_k} papers for this user.",
-        "privacy_note": "This is a compressed local profile, not the user's full Zotero library.",
-        "local_ranking": {
-            "run_id": ranking_run.id,
-            "ranking_method": ranking_run.ranking_method,
-            "embedding_model": ranking_run.embedding_model,
-        },
         "user_profile": {
             "research_summary": profile.research_summary,
             "explicit_interests": profile.explicit_interests,
@@ -34,12 +28,7 @@ def build_rerank_messages(
             {
                 "external_id": item.paper.external_id,
                 "title": item.paper.title,
-                "authors": item.paper.authors[:8],
                 "abstract": (item.paper.abstract or "")[:1500],
-                "categories": item.paper.categories,
-                "published_date": item.paper.published_date.isoformat() if item.paper.published_date else None,
-                "url": str(item.paper.url) if item.paper.url else None,
-                "local_score": round(item.local_score, 4),
             }
             for item in ranked_candidates
         ],
