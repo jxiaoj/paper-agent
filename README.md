@@ -263,7 +263,7 @@ Pages:
 - Zotero folders in the trash are ignored when the API marks them as `deleted`.
 - `User Profile`: inspect the latest `user_profile` and rebuild it with the profile defaults from `project_config.toml`.
 - `Run Recommendations`: run the module 7 workflow from the UI, with controls for Zotero/arXiv sync and dry-run mode.
-- `Today Recommendations`: display saved recommendation cards and submit feedback buttons: like, dislike, save, not relevant, and already read.
+- `Today Recommendations`: display saved recommendation cards and submit feedback buttons: like, dislike, and save.
 
 Feedback submitted in the UI is saved to the local `feedback` table.
 

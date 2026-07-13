@@ -392,8 +392,6 @@ def render_feedback_controls(store: SQLiteStore, recommendation: Recommendation)
         ("Like", FeedbackType.LIKE),
         ("Dislike", FeedbackType.DISLIKE),
         ("Save", FeedbackType.SAVE),
-        ("Not relevant", FeedbackType.NOT_RELEVANT),
-        ("Already read", FeedbackType.ALREADY_READ),
     ]
     cols = st.columns(len(labels))
     for column, (label, feedback_type) in zip(cols, labels, strict=True):

@@ -758,10 +758,18 @@ class SQLiteStore:
             return feedback.model_copy(update={"id": cursor.lastrowid})
 
     def list_feedback(self, limit: int = 50) -> list[Feedback]:
+        supported_types = [feedback_type.value for feedback_type in FeedbackType]
+        placeholders = ",".join("?" for _ in supported_types)
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM feedback ORDER BY created_at DESC, id DESC LIMIT ?",
-                (limit,),
+                f"""
+                SELECT *
+                FROM feedback
+                WHERE feedback_type IN ({placeholders})
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (*supported_types, limit),
             ).fetchall()
         return [_feedback_from_row(row) for row in rows]
 

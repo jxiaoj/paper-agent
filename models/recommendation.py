@@ -8,8 +8,6 @@ class FeedbackType(StrEnum):
     LIKE = "like"
     DISLIKE = "dislike"
     SAVE = "save"
-    NOT_RELEVANT = "not_relevant"
-    ALREADY_READ = "already_read"
 
 
 class RecommendationCard(BaseModel):

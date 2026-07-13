@@ -216,9 +216,7 @@ def run_local_ranking(
         blocked_keys = set()
         if not include_recommended:
             blocked_keys.update(store.get_recommended_candidate_keys())
-        blocked_keys.update(
-            store.get_feedback_candidate_keys({FeedbackType.DISLIKE, FeedbackType.NOT_RELEVANT})
-        )
+        blocked_keys.update(store.get_feedback_candidate_keys({FeedbackType.DISLIKE}))
         ranker = RankerAgent(
             vector_store=vector_store,
             top_n=top_n or settings.local_top_k,
