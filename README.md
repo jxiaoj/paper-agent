@@ -151,7 +151,7 @@ Expected behavior:
 
 ## Module 5 Local Embedding Ranker
 
-Run time-weighted Zotero abstract content ranking over candidate papers:
+Run time-weighted interest-paper abstract content ranking over candidate papers:
 
 ```bash
 python -m agents.ranker_agent --ranking-mode library --candidate-limit 200 --top-n 20
@@ -160,12 +160,13 @@ python -m agents.ranker_agent --ranking-mode library --candidate-limit 200 --top
 Expected behavior:
 
 - This is the default module 5 ranking mode.
-- Only Zotero library papers and arXiv candidates with non-empty abstracts participate.
+- Zotero library papers, liked candidate papers, and arXiv candidates with non-empty abstracts participate.
 - If `ZOTERO_ANALYSIS_SCOPE=selected`, only selected Zotero collections participate in the Zotero-library side of this ranking.
 - Selecting a parent Zotero collection also includes child collections.
-- Zotero papers are ordered by `date_added` descending; missing dates are placed last.
+- Zotero papers use `date_added` as their event time, while liked candidate papers use the Like feedback `created_at` time.
+- Zotero papers and liked candidate papers are deduplicated by DOI, source/external_id, and normalized title, then ordered by event time descending.
 - A recent-interest weight is computed as `1 / (1 + log10(index + 1))` and normalized to sum to `1`.
-- Each candidate score is the weighted sum of its abstract cosine similarities to all eligible Zotero abstracts.
+- Each candidate score is the weighted sum of its abstract cosine similarities to all deduplicated interest-paper abstracts.
 - Abstract embeddings are cached locally in `user_zotero_paper_embeddings` and `arxiv_paper_embeddings`, keyed by paper, model, and abstract content hash.
 - This independent experimental mode does not yet filter historical recommendations or negative feedback.
 - Each non-dry-run command prints a `Ranking run id` that can be passed directly to module 6.

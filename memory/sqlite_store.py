@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -488,6 +489,24 @@ class SQLiteStore:
                 (PaperSource.ARXIV.value, limit),
             ).fetchall()
         return [_candidate_paper_from_row(row) for row in rows]
+
+    def get_liked_candidate_papers_with_abstract(self, limit: int = 200) -> list[tuple[Paper, datetime]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT candidate_papers.*, MAX(feedback.created_at) AS liked_at
+                FROM feedback
+                JOIN candidate_papers ON candidate_papers.id = feedback.paper_id
+                WHERE feedback.feedback_type = ?
+                    AND candidate_papers.abstract IS NOT NULL
+                    AND TRIM(candidate_papers.abstract) <> ''
+                GROUP BY candidate_papers.id
+                ORDER BY liked_at DESC, candidate_papers.id DESC
+                LIMIT ?
+                """,
+                (FeedbackType.LIKE.value, limit),
+            ).fetchall()
+        return [(_candidate_paper_from_row(row), _parse_datetime(row["liked_at"])) for row in rows]
 
     def get_candidate_paper_by_external_id(self, source: PaperSource | str, external_id: str) -> Paper | None:
         source_value = source.value if isinstance(source, PaperSource) else source
@@ -1213,6 +1232,12 @@ def _date_part(value: str | None) -> str | None:
     if not value:
         return None
     return value.split("T", 1)[0]
+
+
+def _parse_datetime(value: str | None) -> datetime:
+    if not value:
+        return datetime.min
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _candidate_key(source: str, external_id: str) -> str:

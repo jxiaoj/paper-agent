@@ -512,7 +512,7 @@ LIMIT 3;
 支持两种粗排方法：
 
 1. `profile`：基于用户画像文本和候选论文文本的 embedding 相似度，并加关键词 bonus。
-2. `library`：基于 Zotero 文献摘要和 arXiv 候选论文摘要的加权相似度。
+2. `library`：基于用户兴趣语料和 arXiv 候选论文摘要的加权相似度。兴趣语料由 Zotero 文献和用户 Like 过的候选论文共同组成。
 
 ### 需要的数据
 
@@ -534,7 +534,13 @@ user_profile
 user_library_papers
 ```
 
-且 `library` 模式只使用摘要不为空的 Zotero 文献和 arXiv 候选论文。
+`library` 模式会使用：
+
+- 摘要不为空的 Zotero 文献，事件时间为 `date_added`。
+- 用户 Like 过且摘要不为空的候选论文，事件时间为 Like 反馈的 `created_at`。
+- 摘要不为空的 arXiv 候选论文。
+
+Zotero 文献和 Like 过的候选论文会先按 DOI、source/external_id 和规范化标题去重，再按事件时间倒序排列，越新的事件获得越高的时间衰减权重。
 
 如果 `.env` 中 `ZOTERO_ANALYSIS_SCOPE=selected`，则 `library` 模式只使用选中文件夹中摘要不为空的 Zotero 文献。
 如果选择的是父文件夹，会同时包含其子文件夹中的论文。

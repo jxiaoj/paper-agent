@@ -1,7 +1,9 @@
 import argparse
 import hashlib
 import math
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from app.config import get_settings
 from memory.sqlite_store import SQLiteStore
@@ -18,6 +20,13 @@ class RankedCandidate:
     semantic_score: float
     keyword_bonus: float
     rank_reason: str
+
+
+@dataclass(frozen=True)
+class InterestPaper:
+    paper: Paper
+    event_time: datetime
+    event_source: str
 
 
 class RankerAgent:
@@ -80,22 +89,22 @@ class LibraryContentRanker:
         self.vector_store = vector_store
         self.top_n = top_n
 
-    def rank(self, library_papers: list[Paper], candidate_papers: list[Paper]) -> list[RankedCandidate]:
-        if not library_papers or not candidate_papers:
+    def rank(self, interest_papers: list[InterestPaper], candidate_papers: list[Paper]) -> list[RankedCandidate]:
+        if not interest_papers or not candidate_papers:
             return []
 
-        weights = time_decay_weights(len(library_papers))
-        library_vectors = self._cached_embeddings(library_papers, scope="zotero")
+        weights = time_decay_weights(len(interest_papers))
+        interest_vectors = self._cached_embeddings([event.paper for event in interest_papers])
         candidate_vectors = self._cached_embeddings(candidate_papers, scope="arxiv")
         ranked: list[RankedCandidate] = []
 
         for candidate, candidate_vector in zip(candidate_papers, candidate_vectors, strict=True):
             similarities = [
-                cosine_similarity(candidate_vector, library_vector) for library_vector in library_vectors
+                cosine_similarity(candidate_vector, interest_vector) for interest_vector in interest_vectors
             ]
             score = sum(similarity * weight for similarity, weight in zip(similarities, weights, strict=True))
             top_index = max(range(len(similarities)), key=similarities.__getitem__)
-            top_paper = library_papers[top_index]
+            top_event = interest_papers[top_index]
             ranked.append(
                 RankedCandidate(
                     paper=candidate,
@@ -103,8 +112,9 @@ class LibraryContentRanker:
                     semantic_score=score,
                     keyword_bonus=0.0,
                     rank_reason=(
-                        f"library_weighted_abstract_similarity={score:.3f}; "
-                        f"closest_zotero_paper={top_paper.title}"
+                        f"interest_weighted_abstract_similarity={score:.3f}; "
+                        f"closest_interest_paper={top_event.paper.title}; "
+                        f"closest_interest_source={top_event.event_source}"
                     ),
                 )
             )
@@ -112,7 +122,7 @@ class LibraryContentRanker:
         ranked.sort(key=lambda item: item.local_score, reverse=True)
         return ranked[: self.top_n]
 
-    def _cached_embeddings(self, papers: list[Paper], scope: str) -> list[list[float]]:
+    def _cached_embeddings(self, papers: list[Paper], scope: str | None = None) -> list[list[float]]:
         vectors: list[list[float] | None] = [None] * len(papers)
         missing_indexes: list[int] = []
         missing_texts: list[str] = []
@@ -122,7 +132,8 @@ class LibraryContentRanker:
             if paper.id is None or not paper.abstract:
                 continue
             content_hash = _content_hash(paper.abstract)
-            if scope == "zotero":
+            cache_scope = scope or _embedding_scope(paper)
+            if cache_scope == "zotero":
                 vector = self.store.get_user_zotero_paper_embedding(paper.id, model_name, content_hash)
             else:
                 vector = self.store.get_arxiv_paper_embedding(paper.id, model_name, content_hash)
@@ -137,7 +148,8 @@ class LibraryContentRanker:
             for index, vector in zip(missing_indexes, generated, strict=True):
                 paper = papers[index]
                 content_hash = _content_hash(paper.abstract or "")
-                if scope == "zotero":
+                cache_scope = scope or _embedding_scope(paper)
+                if cache_scope == "zotero":
                     self.store.save_user_zotero_paper_embedding(paper.id, model_name, content_hash, vector)
                 else:
                     self.store.save_arxiv_paper_embedding(paper.id, model_name, content_hash, vector)
@@ -174,15 +186,23 @@ def run_local_ranking(
             limit=library_limit,
             collection_keys=collection_keys,
         )
+        liked_papers = store.get_liked_candidate_papers_with_abstract(limit=library_limit)
+        interest_papers = build_interest_paper_events(
+            zotero_papers=library_papers,
+            liked_papers=liked_papers,
+            limit=library_limit,
+        )
         candidate_papers = store.get_arxiv_candidates_with_abstract(limit=candidate_limit)
-        if not library_papers:
+        if not interest_papers:
             if collection_keys is None:
-                raise RuntimeError("No Zotero papers with abstracts found for library content ranking.")
-            raise RuntimeError("Selected Zotero collections contain no papers with abstracts for library ranking.")
+                raise RuntimeError("No Zotero papers or liked papers with abstracts found for library content ranking.")
+            raise RuntimeError(
+                "Selected Zotero collections and liked papers contain no papers with abstracts for library ranking."
+            )
         if not candidate_papers:
             raise RuntimeError("No arXiv candidate papers with abstracts found for library content ranking.")
         ranker = LibraryContentRanker(store=store, vector_store=vector_store, top_n=top_n or settings.local_top_k)
-        ranked = ranker.rank(library_papers=library_papers, candidate_papers=candidate_papers)
+        ranked = ranker.rank(interest_papers=interest_papers, candidate_papers=candidate_papers)
     else:
         profile = store.get_latest_user_profile()
         if profile is None:
@@ -247,8 +267,72 @@ def time_decay_weights(corpus_size: int) -> list[float]:
     return [weight / total for weight in raw_weights]
 
 
+def build_interest_paper_events(
+    zotero_papers: list[Paper],
+    liked_papers: list[tuple[Paper, datetime]],
+    limit: int,
+) -> list[InterestPaper]:
+    events = [
+        InterestPaper(
+            paper=paper,
+            event_time=_normalize_datetime(paper.date_added or paper.created_at),
+            event_source="zotero_date_added",
+        )
+        for paper in zotero_papers
+    ]
+    events.extend(
+        InterestPaper(
+            paper=paper,
+            event_time=_normalize_datetime(liked_at),
+            event_source="liked_feedback",
+        )
+        for paper, liked_at in liked_papers
+    )
+    events.sort(key=lambda event: event.event_time, reverse=True)
+
+    deduped: list[InterestPaper] = []
+    seen_keys: set[str] = set()
+    for event in events:
+        keys = _dedupe_keys(event.paper)
+        if keys and any(key in seen_keys for key in keys):
+            continue
+        seen_keys.update(keys)
+        deduped.append(event)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
 def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _embedding_scope(paper: Paper) -> str:
+    if paper.source == PaperSource.ZOTERO:
+        return "zotero"
+    return "arxiv"
+
+
+def _normalize_datetime(value: datetime | str | None) -> datetime:
+    if value is None:
+        return datetime.min
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _dedupe_keys(paper: Paper) -> list[str]:
+    keys: list[str] = []
+    if paper.doi:
+        keys.append("doi:" + paper.doi.strip().lower())
+    if paper.external_id:
+        keys.append(f"external:{paper.source.value}:{paper.external_id.strip().lower()}")
+    normalized_title = re.sub(r"\W+", " ", paper.title.lower()).strip()
+    if normalized_title:
+        keys.append("title:" + normalized_title)
+    return keys
 
 
 def profile_to_embedding_text(profile: UserProfile) -> str:
